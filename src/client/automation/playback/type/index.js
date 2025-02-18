@@ -5,9 +5,13 @@ import ClickAutomation from '../click';
 import typeText from './type-text';
 import getKeyCode from '../../utils/get-key-code';
 import getKeyIdentifier from '../../utils/get-key-identifier';
-import { getDefaultAutomationOffsets } from '../../utils/offsets';
+import { getDefaultAutomationOffsets } from '../../../core/utils/offsets';
 import AutomationSettings from '../../settings';
 import getKeyProperties from '../../utils/get-key-properties';
+import cursor from '../../cursor';
+import NativeAutomationInput from '../../../../native-automation/client/input';
+import getKeyInfo from '../press/get-key-info';
+import CDPEventDescriptor from '../../../../native-automation/client/event-descriptor';
 
 const Promise               = hammerhead.Promise;
 const extend                = hammerhead.utils.extend;
@@ -24,9 +28,9 @@ const SPECIAL_KEYS    = testCafeCore.KEY_MAPS.specialKeys;
 
 
 export default class TypeAutomation {
-    constructor (element, text, typeOptions) {
-        this.element = TypeAutomation.findTextEditableChild(element) || element;
-        this.typingText    = text.toString();
+    constructor (element, text, typeOptions, dispatchNativeAutomationEventFn) {
+        this.element    = TypeAutomation.findTextEditableChild(element) || element;
+        this.typingText = text.toString();
 
         this.modifiers = typeOptions.modifiers;
         this.caretPos  = typeOptions.caretPos;
@@ -57,6 +61,8 @@ export default class TypeAutomation {
             simulateKeypress: true,
             simulateTypeChar: true,
         };
+
+        this.nativeAutomationInput = dispatchNativeAutomationEventFn ? new NativeAutomationInput(dispatchNativeAutomationEventFn) : null;
     }
 
     static findTextEditableChild (element) {
@@ -132,7 +138,7 @@ export default class TypeAutomation {
                 modifiers: this.modifiers,
             });
 
-            const clickAutomation = new ClickAutomation(this.element, clickOptions);
+            const clickAutomation = new ClickAutomation(this.element, clickOptions, window, cursor);
 
             return clickAutomation
                 .run(useStrictElementCheck)
@@ -167,6 +173,15 @@ export default class TypeAutomation {
                 textSelection.deleteSelectionContents(this.element, true);
         }
 
+        if (this._canUseNativeAutomationInput()) {
+            if (this.paste)
+                return this.nativeAutomationInput.executeInsertText(this.typingText);
+
+            const eventSequence = this._calculateCDPEventSequence();
+
+            return this.nativeAutomationInput.executeEventSequence(eventSequence);
+        }
+
         return promiseUtils.whilst(() => !this._isTypingFinished(), () => this._typingStep());
     }
 
@@ -174,20 +189,61 @@ export default class TypeAutomation {
         return this.currentPos === this.typingText.length;
     }
 
+    _getCurrentKey (keyCode, char) {
+        return keyCode === SPECIAL_KEYS['enter'] ? 'Enter' : char;
+    }
+
+    _calculateCDPEventSequence () {
+        const eventSequence = [];
+
+        for (const char of this.typingText) {
+            const currentKeyCode   = getKeyCode(char);
+            const currentKey       = this._getCurrentKey(currentKeyCode, char);
+            const keyInfo          = getKeyInfo(currentKey);
+            const simulatedKeyInfo = extend({ key: currentKey }, keyInfo);
+
+            eventSequence.push(
+                CDPEventDescriptor.keyDown(simulatedKeyInfo),
+                CDPEventDescriptor.keyUp(simulatedKeyInfo),
+                CDPEventDescriptor.delay(this.automationSettings.keyActionStepDelay)
+            );
+        }
+
+        return eventSequence;
+    }
+
+    _canUseNativeAutomationInput () {
+        if (!this.nativeAutomationInput)
+            return false;
+
+        // NOTE: Type to non text-editable and content-editable elements are not supported in the native automation mode.
+        // In this case, TestCafe just set element value with raising events.
+        if (!domUtils.isTextEditableElement(this.element)
+            && domUtils.isInputElement(this.element)
+            || domUtils.isContentEditableElement(this.element))
+            return false;
+
+        return true;
+    }
+
+    _performTypingStep () {
+        this._keydown();
+        this._keypress();
+
+        return this._keyup();
+    }
+
     _typingStep () {
         const char = this.typingText.charAt(this.currentPos);
 
         this.currentKeyCode       = getKeyCode(char);
         this.currentCharCode      = this.typingText.charCodeAt(this.currentPos);
-        this.currentKey           = this.currentKeyCode === SPECIAL_KEYS['enter'] ? 'Enter' : char;
+        this.currentKey           = this._getCurrentKey(this.currentKeyCode, char);
         this.currentKeyIdentifier = getKeyIdentifier(this.currentKey);
 
         this.ignoreChangeEvent = domUtils.getElementValue(this.element) === elementEditingWatcher.getElementSavedValue(this.element);
 
-        this._keydown();
-        this._keypress();
-
-        return this._keyup();
+        return this._performTypingStep();
     }
 
     _keydown () {
@@ -269,6 +325,7 @@ export default class TypeAutomation {
 
     _typeAllText (element) {
         typeText(element, this.typingText, this.caretPos);
+
         return delay(this.automationSettings.keyActionStepDelay);
     }
 

@@ -4,10 +4,10 @@ const EventEmitter                     = require('events');
 const Module                           = require('module');
 const fs                               = require('fs');
 const del                              = require('del');
-const OS                               = require('os-family');
+const osFamily                         = require('os-family');
 const { expect }                       = require('chai');
 const { noop }                         = require('lodash');
-const proxyquire                       = require('proxyquire');
+const proxyquire                       = require('proxyquire').noPreserveCache();
 const sinon                            = require('sinon');
 const correctFilePath                  = require('../../lib/utils/correct-file-path');
 const escapeUserAgent                  = require('../../lib/utils/escape-user-agent');
@@ -18,15 +18,20 @@ const getCommonPath                    = require('../../lib/utils/get-common-pat
 const resolvePathRelativelyCwd         = require('../../lib/utils/resolve-path-relatively-cwd');
 const getFilterFn                      = require('../../lib/utils/get-filter-fn');
 const prepareReporters                 = require('../../lib/utils/prepare-reporters');
-const { replaceLeadingSpacesWithNbsp } = require('../../lib/errors/test-run/utils');
 const createTempProfile                = require('../../lib/browser/provider/built-in/dedicated/chrome/create-temp-profile');
-const parseUserAgent                   = require('../../lib/utils/parse-user-agent');
+const { parseUserAgent }               = require('../../lib/utils/parse-user-agent');
 const diff                             = require('../../lib/utils/diff');
-
-
+const { generateScreenshotMark }       = require('../../lib/screenshots/utils');
+const getViewPortWidth                 = require('../../lib/utils/get-viewport-width');
+const TEST_RUN_PHASE                   = require('../../lib/test-run/phase');
+const {
+    replaceLeadingSpacesWithNbsp,
+    markup,
+    SUBTITLES,
+} = require('../../lib/errors/test-run/utils');
 const {
     buildChromeArgs,
-    IN_DOCKER_FLAGS,
+    CONTAINERIZED_CHROME_FLAGS,
 } = require('../../lib/browser/provider/built-in/dedicated/chrome/build-chrome-args');
 
 describe('Utils', () => {
@@ -128,6 +133,18 @@ describe('Utils', () => {
                     userAgent:       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.130 Electron/7.1.7 Safari/537.36',
                 },
             },
+            {
+                sourceUA: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/113.0.1774.42 Safari/537.36 HeadlessEdg/113.0.1774.42',
+                expected: {
+                    'engine':          { 'name': 'Blink', 'version': '0.0' },
+                    'name':            'Microsoft Edge',
+                    'os':              { 'name': 'Windows', 'version': '10' },
+                    'platform':        'desktop',
+                    'prettyUserAgent': 'Microsoft Edge 113.0.1774.42 / Windows 10',
+                    'userAgent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/113.0.1774.42 Safari/537.36 HeadlessEdg/113.0.1774.42',
+                    'version':         '113.0.1774.42',
+                },
+            },
         ];
 
         testCases.forEach(testCase => {
@@ -175,7 +192,7 @@ describe('Utils', () => {
                 'test/server/data/file-list/dir4/dir4-2/file-4-2-3.testcafe',
             ];
 
-            if (OS.win) {
+            if (osFamily.win) {
                 expectedFiles.push(
                     'test/server/data/file-list/dir5/file-5-1.js',
                     'test/server/data/file-list/dir6/file-6-1.js'
@@ -196,7 +213,7 @@ describe('Utils', () => {
                 'test/server/data/file-list/dir4/**/*/',
             ];
 
-            if (OS.win) {
+            if (osFamily.win) {
                 fileList.push(
                     'test\\server\\data\\file-list\\dir5\\*\\',
                     'test\\server\\data\\file-list\\dir6\\'
@@ -208,7 +225,7 @@ describe('Utils', () => {
             });
         });
 
-        if (OS.win) {
+        if (osFamily.win) {
             it('File on same drive but with different letter case in label (win only)', () => {
                 const { root, dir, base } = path.parse(process.cwd());
 
@@ -322,12 +339,41 @@ describe('Utils', () => {
         });
     });
 
-    it('Replace leading spaces with &nbsp', () => {
-        expect(replaceLeadingSpacesWithNbsp('test')).eql('test');
-        expect(replaceLeadingSpacesWithNbsp(' test')).eql('&nbsp;test');
-        expect(replaceLeadingSpacesWithNbsp('  test')).eql('&nbsp;&nbsp;test');
-        expect(replaceLeadingSpacesWithNbsp(' test1 test2 ')).eql('&nbsp;test1 test2 ');
-        expect(replaceLeadingSpacesWithNbsp('  test1\n test2 \r\ntest3 ')).eql('&nbsp;&nbsp;test1\n&nbsp;test2 \r\ntest3 ');
+    describe('Error utils', () => {
+        it('Markup should return correct value for error in "pendingFinalization" phase', () => {
+            const err = {
+                userAgent:       'Chrome 104.0.5112.81 / Windows 10',
+                screenshotPath:  '',
+                testRunId:       'UGqL1Nz7Z',
+                testRunPhase:    'pendingFinalization',
+                code:            'E53',
+                isTestCafeError: true,
+                callsite:        '0',
+                errMsg:          'AssertionError: expected false to be truthy',
+                diff:            false,
+                id:              '7fTLOzU',
+
+                getCallsiteMarkup: () => '0',
+            };
+            const msgMarkup      = '\n        AssertionError: expected false to be truthy\n\n        \n';
+            const expectedResult = '<div class="message">AssertionError: expected false to be truthy</div>\n\n' +
+                                   '<strong>Browser:</strong> <span class="user-agent">Chrome 104.0.5112.81 / Windows 10</span>\n\n0';
+
+            expect(markup(err, msgMarkup)).eql(expectedResult);
+        });
+
+        it('SUBTITLES should contains definitions of all test run phases', () => {
+            for (const phase in TEST_RUN_PHASE)
+                expect(phase in SUBTITLES).to.be.ok;
+        });
+
+        it('Replace leading spaces with &nbsp', () => {
+            expect(replaceLeadingSpacesWithNbsp('test')).eql('test');
+            expect(replaceLeadingSpacesWithNbsp(' test')).eql('&nbsp;test');
+            expect(replaceLeadingSpacesWithNbsp('  test')).eql('&nbsp;&nbsp;test');
+            expect(replaceLeadingSpacesWithNbsp(' test1 test2 ')).eql('&nbsp;test1 test2 ');
+            expect(replaceLeadingSpacesWithNbsp('  test1\n test2 \r\ntest3 ')).eql('&nbsp;&nbsp;test1\n&nbsp;test2 \r\ntest3 ');
+        });
     });
 
     it('Get common path', () => {
@@ -552,26 +598,32 @@ describe('Utils', () => {
 
         let chromeArgs = '';
 
-        const IN_DOCKER_FLAGS_RE       = new RegExp(IN_DOCKER_FLAGS.join(' '));
+        const IN_DOCKER_FLAGS_RE       = new RegExp(CONTAINERIZED_CHROME_FLAGS.join(' '));
         const SANDBOX_FLAG_RE          = new RegExp('--no-sandbox');
         const DISABLE_DEV_SHM_USAGE_RE = new RegExp('--disable-dev-shm-usage');
-        let inDockerFlagMatch    = null;
 
-        chromeArgs        = buildChromeArgs({ config, cdpPort, platformArgs, tempProfileDir, inDocker: false });
-        inDockerFlagMatch = chromeArgs.match(IN_DOCKER_FLAGS_RE);
-        expect(inDockerFlagMatch).eql(null);
+        let containerizedChromeFlags = null;
 
-        chromeArgs        = buildChromeArgs({ config, cdpPort, platformArgs, tempProfileDir, inDocker: true });
-        inDockerFlagMatch = chromeArgs.match(IN_DOCKER_FLAGS_RE);
-        expect(inDockerFlagMatch.length).eql(1);
+        chromeArgs               = buildChromeArgs({ config, cdpPort, platformArgs, tempProfileDir, isContainerized: false });
+        containerizedChromeFlags = chromeArgs.match(IN_DOCKER_FLAGS_RE);
+
+        expect(containerizedChromeFlags).eql(null);
+
+        chromeArgs               = buildChromeArgs({ config, cdpPort, platformArgs, tempProfileDir, isContainerized: true });
+        containerizedChromeFlags = chromeArgs.match(IN_DOCKER_FLAGS_RE);
+
+        expect(containerizedChromeFlags.length).eql(1);
 
         // NOTE: Flag should not be duplicated
-        config.userArgs = '--no-sandbox --disable-dev-shm-usage';
-        chromeArgs        = buildChromeArgs({ config, cdpPort, platformArgs, tempProfileDir, inDocker: true });
-        inDockerFlagMatch = chromeArgs.match(SANDBOX_FLAG_RE);
-        expect(inDockerFlagMatch.length).eql(1);
-        inDockerFlagMatch = chromeArgs.match(DISABLE_DEV_SHM_USAGE_RE);
-        expect(inDockerFlagMatch.length).eql(1);
+        config.userArgs          = '--no-sandbox --disable-dev-shm-usage';
+        chromeArgs               = buildChromeArgs({ config, cdpPort, platformArgs, tempProfileDir, isContainerized: true });
+        containerizedChromeFlags = chromeArgs.match(SANDBOX_FLAG_RE);
+
+        expect(containerizedChromeFlags.length).eql(1);
+
+        containerizedChromeFlags = chromeArgs.match(DISABLE_DEV_SHM_USAGE_RE);
+
+        expect(containerizedChromeFlags.length).eql(1);
     });
 
     describe('Create temporary profile for the Google Chrome browser', () => {
@@ -604,6 +656,66 @@ describe('Utils', () => {
             const preferences = JSON.parse(fs.readFileSync(profileFile));
 
             expect(preferences.profile.content_settings.exceptions.popups).to.be.undefined;
+        });
+    });
+
+    it('generateScreenshotMark', () => {
+        const { markSeed } = generateScreenshotMark();
+
+        expect(markSeed.length).eql(128);
+
+        for (const markPixel of markSeed)
+            expect(markPixel === 0 || markPixel === 255).is.true;
+    });
+
+    it('getViewPortWidth', () => {
+        const nonTTYStreamMock = {};
+
+        expect(getViewPortWidth(nonTTYStreamMock)).eql(Infinity);
+    });
+
+    describe('checkIsVM', () => {
+        const vendors = ['virtual', 'vmware', 'hyperv', 'wsl', 'hyper-v', 'microsoft', 'parallels', 'qemu'];
+
+        const checkVMVendors = async (platform, stdout = '') => {
+            const { checkIsVM } = proxyquire('../../lib/utils/check-is-vm', {
+                '../../lib/utils/promisified-functions': {
+                    exec: () => Promise.resolve({ stdout }),
+                },
+                'os': {
+                    platform: () => platform,
+                },
+            });
+
+            return await checkIsVM();
+        };
+
+        it('should return false on real machine', async () => {
+            const vm = await checkVMVendors('win32', '');
+
+            expect(vm).false;
+        });
+
+        it('should detect windows machine', async () => {
+            await Promise.all(vendors.map(async vendor => {
+                const vm = await checkVMVendors('win32', vendor);
+
+                expect(vm).true;
+            }));
+        });
+
+        it('should detect linux machine', async () => {
+            const vm = await checkVMVendors('linux');
+
+            expect(vm).true;
+        });
+
+        it('should detect macos machine', async () => {
+            await Promise.all(vendors.map(async vendor => {
+                const vm = await checkVMVendors('darwin', vendor);
+
+                expect(vm).true;
+            }));
         });
     });
 });

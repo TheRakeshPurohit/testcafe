@@ -1,13 +1,11 @@
-import { readSync as read } from 'read-file-relative';
 import { Dictionary } from '../../../../../../configuration/interfaces';
 import Protocol from 'devtools-protocol';
 import path from 'path';
 import os from 'os';
-import remoteChrome from 'chrome-remote-interface';
+import remoteChrome, { TargetInfo } from 'chrome-remote-interface';
 import debug from 'debug';
 import { GET_WINDOW_DIMENSIONS_INFO_SCRIPT } from '../../../../utils/client-functions';
 import WARNING_MESSAGE from '../../../../../../notifications/warning-message';
-import * as SharedErrors from '../../../../../../shared/errors';
 
 import {
     Config,
@@ -18,32 +16,74 @@ import {
 import prettyTime from 'pretty-hrtime';
 import { CheckedCDPMethod, ELAPSED_TIME_UPPERBOUNDS } from '../elapsed-upperbounds';
 import guardTimeExecution from '../../../../../../utils/guard-time-execution';
-import { CallsiteRecord } from 'callsite-record';
-import { ExecuteClientFunctionCommand, ExecuteSelectorCommand } from '../../../../../../test-run/commands/observation';
-import ClientFunctionExecutor from './client-function-executor';
-import { SwitchToIframeCommand } from '../../../../../../test-run/commands/actions';
+import delay from '../../../../../../utils/delay';
+
+import StartScreencastRequest = Protocol.Page.StartScreencastRequest;
+import ScreencastFrameEvent = Protocol.Page.ScreencastFrameEvent;
+import { NativeAutomationInitOptions } from '../../../../../../shared/types';
+
+import {
+    NativeAutomationBase,
+    NativeAutomationChildWindow,
+    NativeAutomationMainWindow,
+} from '../../../../../../native-automation';
+
+import {
+    getActiveTab,
+    getFirstTab,
+    getTabById,
+    getTabs,
+}
+    from './utils';
 
 const DEBUG_SCOPE = (id: string): string => `testcafe:browser:provider:built-in:chrome:browser-client:${id}`;
 const DOWNLOADS_DIR = path.join(os.homedir(), 'Downloads');
 
 const debugLog = debug('testcafe:browser:provider:built-in:dedicated:chrome');
 
+class ProtocolApiInfo {
+    public inactive: boolean;
+    public client: remoteChrome.ProtocolApi;
+
+    public constructor (client: remoteChrome.ProtocolApi) {
+        this.client   = client;
+        this.inactive = false;
+    }
+}
+
+const SCREENCAST_OPTIONS = {
+    format:        'jpeg',
+    everyNthFrame: 1,
+};
+
+interface VideoFrameData {
+    data: string;
+    sessionId: number;
+}
+
+export const NEW_WINDOW_OPENED_IN_NATIVE_AUTOMATION = 'new-window-opened-in-native-automation';
+
 export class BrowserClient {
-    private _clients: Dictionary<remoteChrome.ProtocolApi> = {};
-    private _runtimeInfo: RuntimeInfo;
-    private readonly _proxyless: boolean;
+    private _clients: Dictionary<ProtocolApiInfo> = {};
+    private readonly _runtimeInfo: RuntimeInfo;
     private _parentTarget?: remoteChrome.TargetInfo;
     private readonly debugLogger: debug.Debugger;
-    private readonly _clientFunctionExecutor: ClientFunctionExecutor;
+    private _videoFramesBuffer: VideoFrameData[];
+    private _lastFrame: VideoFrameData | null;
+    private _screencastFrameListenerAttached = false;
 
-    public constructor (runtimeInfo: RuntimeInfo, proxyless: boolean) {
+    public constructor (runtimeInfo: RuntimeInfo) {
         this._runtimeInfo = runtimeInfo;
         this.debugLogger  = debug(DEBUG_SCOPE(runtimeInfo.browserId));
-        this._proxyless   = proxyless;
-
-        this._clientFunctionExecutor = new ClientFunctionExecutor();
 
         runtimeInfo.browserClient = this;
+
+        this._videoFramesBuffer = [];
+        this._lastFrame         = null;
+    }
+
+    private get _port (): number {
+        return this._runtimeInfo.cdpPort;
     }
 
     private get _clientKey (): string {
@@ -52,21 +92,6 @@ export class BrowserClient {
 
     private get _config (): Config {
         return this._runtimeInfo.config;
-    }
-
-    private async _getTabs (): Promise<remoteChrome.TargetInfo[]> {
-        const tabs = await remoteChrome.List({ port: this._runtimeInfo.cdpPort });
-
-        return tabs.filter(t => t.type === 'page');
-    }
-
-    private async _getActiveTab (): Promise<remoteChrome.TargetInfo> {
-        let tabs = await this._getTabs();
-
-        if (this._runtimeInfo.activeWindowId)
-            tabs = tabs.filter(t => t.title.includes(this._runtimeInfo.activeWindowId));
-
-        return tabs[0];
     }
 
     private _checkDropOfPerformance (method: CheckedCDPMethod, elapsedTime: [number, number]): void {
@@ -82,12 +107,12 @@ export class BrowserClient {
         }
     }
 
-    private async _createClient (): Promise<remoteChrome.ProtocolApi> {
-        const target                     = await this._getActiveTab();
-        const client                     = await remoteChrome({ target, port: this._runtimeInfo.cdpPort });
+    private async _createClient (target: TargetInfo, cacheKey: string = this._clientKey): Promise<remoteChrome.ProtocolApi> {
+        const client = await remoteChrome({ target, port: this._port });
+
         const { Page, Network, Runtime } = client;
 
-        this._clients[this._clientKey] = client;
+        this._clients[cacheKey] = new ProtocolApiInfo(client);
 
         await guardTimeExecution(
             async () => await Page.enable(),
@@ -165,7 +190,7 @@ export class BrowserClient {
         });
     }
 
-    private async _evaluateRuntime (client: remoteChrome.ProtocolApi, expression: string, returnByValue: boolean = false): Promise<Protocol.Runtime.EvaluateResponse> {
+    private async _evaluateRuntime (client: remoteChrome.ProtocolApi, expression: string, returnByValue = false): Promise<Protocol.Runtime.EvaluateResponse> {
         return client.Runtime.evaluate({ expression, returnByValue });
     }
 
@@ -179,24 +204,18 @@ export class BrowserClient {
         this._runtimeInfo.emulatedDevicePixelRatio = this._config.scaleFactor || this._runtimeInfo.originalDevicePixelRatio;
     }
 
-    private async _injectProxylessStuff (client: remoteChrome.ProtocolApi): Promise<void> {
-        await client.Page.addScriptToEvaluateOnNewDocument({
-            source: read('../../../../../../../lib/client/proxyless/index.js') as string,
-        });
-    }
-
     public async resizeWindow (newDimensions: Size): Promise<void> {
         const { browserId, config, viewportSize, providerMethods, emulatedDevicePixelRatio } = this._runtimeInfo;
 
-        const currentWidth = viewportSize.width;
+        const currentWidth  = viewportSize.width;
         const currentHeight = viewportSize.height;
-        const newWidth = newDimensions.width || currentWidth;
-        const newHeight = newDimensions.height || currentHeight;
+        const newWidth      = newDimensions.width || currentWidth;
+        const newHeight     = newDimensions.height || currentHeight;
 
         if (!config.headless)
             await providerMethods.resizeLocalBrowserWindow(browserId, newWidth, newHeight, currentWidth, currentHeight);
 
-        viewportSize.width = newWidth;
+        viewportSize.width  = newWidth;
         viewportSize.height = newHeight;
 
         const client = await this.getActiveClient();
@@ -213,14 +232,71 @@ export class BrowserClient {
         }
     }
 
+    public async maximizeWindowNativeAutomation (): Promise<void> {
+        const target = await getFirstTab(this._port);
+        const client = await this.getActiveClient();
+
+        if (client) {
+            const windowParams = await client.Browser.getWindowForTarget({ targetId: target.id });
+
+            await client.Browser.setWindowBounds({ windowId: windowParams.windowId, bounds: { windowState: 'maximized' } });
+        }
+    }
+
+    public async resizeBounds (newDimensions: Size): Promise<void> {
+        const { viewportSize } = this._runtimeInfo;
+
+        let nonClientWidth  = 0;
+        let nonClientHeight = 0;
+
+        if (viewportSize.outerWidth && viewportSize.outerHeight) {
+            nonClientWidth  = viewportSize.outerWidth - viewportSize.width;
+            nonClientHeight = viewportSize.outerHeight - viewportSize.height;
+        }
+
+        const target = await getFirstTab(this._port);
+        const client = await this.getActiveClient();
+
+        if (client) {
+            const windowParams = await client.Browser.getWindowForTarget({ targetId: target.id });
+
+            if (windowParams.bounds.windowState !== 'normal') {
+                await client.Browser.setWindowBounds({
+                    windowId: windowParams.windowId,
+                    bounds:   {
+                        windowState: 'normal',
+                    },
+                });
+            }
+
+            await client.Browser.setWindowBounds({
+                windowId: windowParams.windowId,
+                bounds:   {
+                    width:  newDimensions.width + nonClientWidth,
+                    height: newDimensions.height + nonClientHeight,
+                },
+            });
+        }
+    }
+
     public isHeadlessTab (): boolean {
         return !!this._parentTarget && this._config.headless;
     }
 
+    public async setClientInactive (windowId: string): Promise<void> {
+        const client = this._clients[windowId];
+
+        if (client)
+            client.inactive = true;
+    }
+
     public async getActiveClient (): Promise<remoteChrome.ProtocolApi | void> {
         try {
-            if (!this._clients[this._clientKey])
-                this._clients[this._clientKey] = await this._createClient();
+            if (!this._clients[this._clientKey]) {
+                const target = await getActiveTab(this._port, this._runtimeInfo.activeWindowId);
+
+                await this._createClient(target);
+            }
         }
         catch (err) {
             debugLog(err);
@@ -228,12 +304,17 @@ export class BrowserClient {
             return void 0;
         }
 
-        return this._clients[this._clientKey];
+        const info = this._clients[this._clientKey];
+
+        if (info.inactive)
+            return void 0;
+
+        return info.client;
     }
 
-    public async init (): Promise<void> {
+    public async initMainWindowCdpClient (): Promise<void> {
         try {
-            const tabs = await this._getTabs();
+            const tabs = await getTabs(this._port);
 
             this._parentTarget = tabs.find(t => t.url.includes(this._runtimeInfo.browserId));
 
@@ -245,11 +326,6 @@ export class BrowserClient {
             if (client) {
                 await this._calculateEmulatedDevicePixelRatio(client);
                 await this._setupClient(client);
-
-                if (this._proxyless) {
-                    await this._injectProxylessStuff(client);
-                    this._clientFunctionExecutor.setupFramesWatching(client.Runtime);
-                }
             }
         }
         catch (e) {
@@ -258,51 +334,35 @@ export class BrowserClient {
     }
 
     public async getScreenshotData (fullPage?: boolean): Promise<Buffer> {
-        let viewportWidth  = 0;
-        let viewportHeight = 0;
-
-        const { config, emulatedDevicePixelRatio } = this._runtimeInfo;
+        let clip: Protocol.Page.Viewport | undefined = void 0;
 
         const client = await this.getActiveClient();
 
-        if (!client)
+        if (!client) {
+            // NOTE: required for https://github.com/DevExpress/testcafe/issues/6037
+            await delay(0);
+
             return Buffer.alloc(0);
-
-        if (fullPage) {
-            const { contentSize, visualViewport } = await client.Page.getLayoutMetrics();
-
-            await this._setDeviceMetricsOverride(
-                client,
-                Math.ceil(contentSize.width),
-                Math.ceil(contentSize.height),
-                emulatedDevicePixelRatio,
-                config.mobile);
-
-            viewportWidth = visualViewport.clientWidth;
-            viewportHeight = visualViewport.clientHeight;
         }
 
-        const screenshotData = await client.Page.captureScreenshot({});
-
         if (fullPage) {
-            if (config.emulation) {
-                await this._setDeviceMetricsOverride(
-                    client,
-                    config.width || viewportWidth,
-                    config.height || viewportHeight,
-                    emulatedDevicePixelRatio,
-                    config.mobile);
-            }
-            else
-                await client.Emulation.clearDeviceMetricsOverride();
+            const metrics           = await client.Page.getLayoutMetrics();
+            const { width, height } = metrics.cssContentSize || metrics.contentSize;
+
+            clip = { x: 0, y: 0, width, height, scale: 1 };
         }
 
-        return Buffer.from(screenshotData.data, 'base64');
+        const result = await client.Page.captureScreenshot({
+            clip,
+            captureBeyondViewport: fullPage,
+        });
+
+        return Buffer.from(result.data, 'base64');
     }
 
     public async closeTab (): Promise<void> {
         if (this._parentTarget)
-            await remoteChrome.Close({ id: this._parentTarget.id, port: this._runtimeInfo.cdpPort });
+            await remoteChrome.Close({ id: this._parentTarget.id, port: this._port });
     }
 
     public async updateMobileViewportSize (): Promise<void> {
@@ -315,68 +375,100 @@ export class BrowserClient {
 
         const windowDimensions = windowDimensionsQueryResult.result.value;
 
-        this._runtimeInfo.viewportSize.width = windowDimensions.outerWidth;
+        this._runtimeInfo.viewportSize.width  = windowDimensions.outerWidth;
         this._runtimeInfo.viewportSize.height = windowDimensions.outerHeight;
     }
 
-    public async executeClientFunction (command: ExecuteClientFunctionCommand, callsite: CallsiteRecord): Promise<object> {
-        const client = await this.getActiveClient();
+    public async closeBrowserChildWindow (windowId: string): Promise<void> {
+        await this.setClientInactive(windowId);
 
-        if (!client)
-            throw new Error('Cannot get the active browser client');
-
-        return this._clientFunctionExecutor.executeClientFunction(client.Runtime, command, callsite);
+        // NOTE: delay browser window closing
+        await delay(100);
     }
 
-    public async executeSelector (command: ExecuteSelectorCommand, callsite: CallsiteRecord, selectorTimeout: number): Promise<object> {
-        const client = await this.getActiveClient();
-
-        if (!client)
-            throw new Error('Cannot get the active browser client');
-
-        return this._clientFunctionExecutor.executeSelector({
-            Runtime:  client.Runtime,
-            errTypes: {
-                notFound:  SharedErrors.CannotObtainInfoForElementSpecifiedBySelectorError.name,
-                invisible: SharedErrors.CannotObtainInfoForElementSpecifiedBySelectorError.name,
-            },
-
-            command, callsite, selectorTimeout,
-        });
-    }
-
-    public async switchToIframe (command: SwitchToIframeCommand, callsite: CallsiteRecord, selectorTimeout: number): Promise<void> {
+    public async startCapturingVideo (): Promise<void> {
         const client = await this.getActiveClient();
 
         if (!client)
             return;
 
-        const selector = command.selector;
+        if (!this._screencastFrameListenerAttached) {
+            client.Page.on('screencastFrame', (event: ScreencastFrameEvent) => {
+                this._videoFramesBuffer.push({
+                    data:      event.data,
+                    sessionId: event.sessionId,
+                });
+            });
 
-        if (typeof selector.timeout === 'number')
-            selectorTimeout = selector.timeout;
+            this._screencastFrameListenerAttached = true;
+        }
 
-        selector.needError = true;
-
-        const node = await this._clientFunctionExecutor.getNode({
-            DOM:      client.DOM,
-            Runtime:  client.Runtime,
-            command:  selector,
-            errTypes: {
-                notFound:  SharedErrors.ActionElementNotFoundError.name,
-                invisible: SharedErrors.ActionElementIsInvisibleError.name,
-            },
-
-            callsite, selectorTimeout,
-        });
-
-        if (!node.frameId)
-            throw new SharedErrors.ActionElementNotIframeError(callsite);
-
-        this._clientFunctionExecutor.setCurrentFrameId(node.frameId);
+        await client.Page.startScreencast(SCREENCAST_OPTIONS as StartScreencastRequest);
     }
 
-    public switchToMainWindow (): void {
-        this._clientFunctionExecutor.setCurrentFrameId('');
+    public async stopCapturingVideo (): Promise<void> {
+        const client = await this.getActiveClient();
+
+        if (!client)
+            return;
+
+        await client.Page.stopScreencast();
+
+        this._lastFrame         = null;
+        this._videoFramesBuffer = [];
+    }
+
+    public async getVideoFrameData (): Promise<Buffer | null> {
+        const firstFrameFromBuffer = this._videoFramesBuffer.shift();
+        const currentVideoFrame    = firstFrameFromBuffer || this._lastFrame;
+
+        if (!currentVideoFrame)
+            return null;
+
+        if (this._videoFramesBuffer.length === 0)
+            this._lastFrame = currentVideoFrame;
+
+        const client = await this.getActiveClient();
+
+        if (!client)
+            return null;
+
+        if (firstFrameFromBuffer)
+            await client.Page.screencastFrameAck({ sessionId: currentVideoFrame.sessionId });
+
+        return Buffer.from(currentVideoFrame.data, 'base64');
+    }
+
+    private async _onTargetCreatedHandler (targetInfo: remoteChrome.TargetInfo, options: NativeAutomationInitOptions): Promise<string | null> {
+        const target = await getTabById(this._port, targetInfo.targetId);
+
+        if (!target)
+            return null;
+
+        try {
+            const client           = await this._createClient(target, targetInfo.targetId);
+            const nativeAutomation = new NativeAutomationChildWindow(this._runtimeInfo.browserId, target.id, client, options);
+
+            await nativeAutomation.start();
+
+            return target.id;
+        }
+        catch (err) {
+            debugLog(err);
+
+            return null;
+        }
+    }
+
+    public async createMainWindowNativeAutomation (options: NativeAutomationInitOptions): Promise<NativeAutomationBase | null> {
+        const target = await getFirstTab(this._port);
+        const client = await this._createClient(target);
+
+        const nativeAutomation = new NativeAutomationMainWindow(this._runtimeInfo.browserId, target.id, client, options);
+
+        nativeAutomation.on(NEW_WINDOW_OPENED_IN_NATIVE_AUTOMATION, async targetInfo => this._onTargetCreatedHandler(targetInfo, options));
+
+        return nativeAutomation;
     }
 }
+

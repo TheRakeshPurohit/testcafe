@@ -4,16 +4,15 @@ import {
     identity,
     assign,
     isNil as isNullOrUndefined,
-    flattenDeep as flatten,
+    flattenDeep,
+    castArray,
 } from 'lodash';
 
 import { getCallsiteForMethod } from '../../errors/get-callsite';
 import ClientFunctionBuilder from '../../client-functions/client-function-builder';
 import Assertion from './assertion';
 import { getDelegatedAPIList, delegateAPI } from '../../utils/delegated-api';
-import WARNING_MESSAGE from '../../notifications/warning-message';
 import addWarning from '../../notifications/add-rendered-warning';
-import { getCallsiteId, getCallsiteStackFrameString } from '../../utils/callsite';
 import { getDeprecationMessage, DEPRECATED } from '../../notifications/deprecated';
 
 import {
@@ -36,6 +35,7 @@ import {
     OpenWindowCommand,
     CloseWindowCommand,
     GetCurrentWindowCommand,
+    GetCurrentCDPSessionCommand,
     SwitchToWindowCommand,
     SwitchToWindowByPredicateCommand,
     SwitchToParentWindowCommand,
@@ -50,6 +50,14 @@ import {
     ScrollIntoViewCommand,
     UseRoleCommand,
     DispatchEventCommand,
+    GetCookiesCommand,
+    SetCookiesCommand,
+    DeleteCookiesCommand,
+    RequestCommand,
+    SkipJsErrorsCommand,
+    AddRequestHooksCommand,
+    RemoveRequestHooksCommand,
+    ReportCommand,
 } from '../../test-run/commands/actions';
 
 import {
@@ -61,41 +69,50 @@ import {
 } from '../../test-run/commands/browser-manipulation';
 
 import { WaitCommand, DebugCommand } from '../../test-run/commands/observation';
-import assertRequestHookType from '../request-hooks/assert-type';
 import { createExecutionContext as createContext } from './execution-context';
-import { isClientFunction, isSelector } from '../../client-functions/types';
-import TestRunProxy from '../../services/compiler/test-run-proxy';
+import { isSelector } from '../../client-functions/types';
 
 import {
     MultipleWindowsModeIsDisabledError,
     MultipleWindowsModeIsNotAvailableInRemoteBrowserError,
+    MultipleWindowsModeIsNotSupportedInNativeAutomationModeError,
 } from '../../errors/test-run';
+
 import { AssertionCommand } from '../../test-run/commands/assertion';
+import { getCallsiteId, getCallsiteStackFrameString } from '../../utils/callsite';
+import ReExecutablePromise from '../../utils/re-executable-promise';
+import { sendRequestThroughAPI as sendRequest } from '../../test-run/request/send';
+import { RequestRuntimeError } from '../../errors/runtime';
+import { RUNTIME_ERRORS } from '../../errors/types';
+import CustomActions from './custom-actions';
+import delegatedAPI from './delegated-api';
+import { getFixtureInfo, getTestInfo } from '../../utils/get-test-and-fixture-info';
 
 const originalThen = Promise.resolve().then;
-
-let inDebug = false;
-
-function delegatedAPI (methodName) {
-    return `_${methodName}$`;
-}
 
 export default class TestController {
     constructor (testRun) {
         this._executionContext = null;
 
-        this.testRun               = testRun;
-        this.executionChain        = Promise.resolve();
-        this.warningLog            = testRun.warningLog;
+        this.testRun        = testRun;
+        this.executionChain = Promise.resolve();
+        this.warningLog     = testRun.warningLog;
+        this._customActions = new CustomActions(this, testRun?.opts?.customActions);
+
+        this._addTestControllerToExecutionChain();
     }
 
-    // NOTE: we track missing `awaits` by exposing a special custom Promise to user code.
-    // Action or assertion is awaited if:
-    // a)someone used `await` so Promise's `then` function executed
-    // b)Promise chained by using one of the mixed-in controller methods
+    _addTestControllerToExecutionChain () {
+        this.executionChain._testController = this;
+    }
+
+    // NOTE: TestCafe executes actions and assertions asynchronously in the following cases:
+    // a) The `await` keyword that proceeds the method declaration triggers the `then` function of a Promise.
+    // b) The action is chained to another `awaited` method.
     //
-    // In both scenarios, we check that callsite that produced Promise is equal to the one
-    // that is currently missing await. This is required to workaround scenarios like this:
+    // In order to track missing `await` statements, TestCafe exposes a special Promise to the user.
+    // When TestCafe detects a missing `await` statement, it compares the method's callsite to the call site of the exposed Promise.
+    // This workaround is necessary for situations like these:
     //
     // var t2 = t.click('#btn1'); // <-- stores new callsiteWithoutAwait
     // await t2;                  // <-- callsiteWithoutAwait = null
@@ -120,9 +137,19 @@ export default class TestController {
         return extendedPromise;
     }
 
-    _enqueueTask (apiMethodName, createTaskExecutor) {
-        const callsite = getCallsiteForMethod(apiMethodName);
-        const executor = createTaskExecutor(callsite);
+    _createCommand (CmdCtor, cmdArgs, callsite) {
+        try {
+            return new CmdCtor(cmdArgs, this.testRun);
+        }
+        catch (err) {
+            err.callsite = callsite;
+
+            throw err;
+        }
+    }
+
+    _enqueueTask (apiMethodName, createTaskExecutor, callsite) {
+        const executor = createTaskExecutor();
 
         this.executionChain.then = originalThen;
         this.executionChain      = this.executionChain.then(executor);
@@ -131,21 +158,20 @@ export default class TestController {
 
         this.executionChain = this._createExtendedPromise(this.executionChain, callsite);
 
+        this._addTestControllerToExecutionChain();
+
         return this.executionChain;
     }
 
-    _enqueueCommand (CmdCtor, cmdArgs) {
-        return this._enqueueTask(CmdCtor.methodName, callsite => {
-            let command = null;
+    enqueueCommand (CmdCtor, cmdArgs, validateCommandFn, callsite) {
+        callsite = callsite || getCallsiteForMethod(CmdCtor.methodName);
 
-            try {
-                command = new CmdCtor(cmdArgs, this.testRun);
-            }
-            catch (err) {
-                err.callsite = callsite;
-                throw err;
-            }
+        const command = this._createCommand(CmdCtor, cmdArgs, callsite);
 
+        if (typeof validateCommandFn === 'function')
+            validateCommandFn(this, command, callsite);
+
+        return this._enqueueTask(command.methodName, () => {
             return () => {
                 return this.testRun.executeCommand(command, callsite)
                     .catch(err => {
@@ -154,11 +180,14 @@ export default class TestController {
                         throw err;
                     });
             };
-        });
+        }, callsite);
     }
 
     _validateMultipleWindowCommand (apiMethodName) {
         const { disableMultipleWindows, activeWindowId } = this.testRun;
+
+        if (this.testRun.isNativeAutomation && !this.testRun.isExperimentalMultipleWindows)
+            throw new MultipleWindowsModeIsNotSupportedInNativeAutomationModeError(apiMethodName);
 
         if (disableMultipleWindows)
             throw new MultipleWindowsModeIsDisabledError(apiMethodName);
@@ -196,32 +225,136 @@ export default class TestController {
         return this.testRun.browser;
     }
 
+    _customActions$getter () {
+        return this._customActions || new CustomActions(this, this.testRun.opts.customActions);
+    }
+
+    _test$getter () {
+        return getTestInfo(this.testRun);
+    }
+
+    _fixture$getter () {
+        return getFixtureInfo(this.testRun);
+    }
+
     [delegatedAPI(DispatchEventCommand.methodName)] (selector, eventName, options = {}) {
-        return this._enqueueCommand(DispatchEventCommand, { selector, eventName, options, relatedTarget: options.relatedTarget });
+        return this.enqueueCommand(DispatchEventCommand, { selector, eventName, options, relatedTarget: options.relatedTarget });
+    }
+
+    _prepareCookieArguments (args, isSetCommand = false) {
+        const urlsArg = castArray(args[1]);
+        const urls    = Array.isArray(urlsArg) && typeof urlsArg[0] === 'string' ? urlsArg : [];
+
+        const cookiesArg = urls.length ? args[0] : args;
+        const cookies    = [];
+
+        flattenDeep(castArray(cookiesArg)).forEach(cookie => {
+            if (isSetCommand && !cookie.name && typeof cookie === 'object')
+                Object.entries(cookie).forEach(([name, value]) => cookies.push({ name, value }));
+            else if (!isSetCommand && typeof cookie === 'string')
+                cookies.push({ name: cookie });
+            else
+                cookies.push(cookie);
+        });
+
+        return { urls, cookies };
+    }
+
+    [delegatedAPI(GetCookiesCommand.methodName)] (...args) {
+        return this.enqueueCommand(GetCookiesCommand, this._prepareCookieArguments(args));
+    }
+
+    [delegatedAPI(SetCookiesCommand.methodName)] (...args) {
+        const { urls, cookies } = this._prepareCookieArguments(args, true);
+
+        return this.enqueueCommand(SetCookiesCommand, { cookies, url: urls[0] });
+    }
+
+    [delegatedAPI(DeleteCookiesCommand.methodName)] (...args) {
+        return this.enqueueCommand(DeleteCookiesCommand, this._prepareCookieArguments(args));
+    }
+
+    _prepareRequestArguments (bindOptions, ...args) {
+        const [url, options] = typeof args[0] === 'object' ? [args[0].url, args[0]] : args;
+
+        return {
+            url,
+            options: Object.assign({}, options, bindOptions),
+        };
+    }
+
+    _createRequestFunction (bindOptions = {}) {
+        const controller = this;
+        const callsite   = getCallsiteForMethod(RequestCommand.methodName);
+
+        if (!controller.testRun)
+            throw new RequestRuntimeError(callsite, RUNTIME_ERRORS.requestCannotResolveTestRun);
+
+        return function (...args) {
+            const cmdArgs = controller._prepareRequestArguments(bindOptions, ...args);
+            const command = controller._createCommand(RequestCommand, cmdArgs, callsite);
+
+            const options = {
+                ...command.options,
+                url: command.url || command.options.url || '',
+            };
+
+            const promise = ReExecutablePromise.fromFn(async () => {
+                return sendRequest(controller.testRun, options, callsite);
+            });
+
+            RequestCommand.resultGetters.forEach(getter => {
+                Object.defineProperty(promise, getter, {
+                    get: () => ReExecutablePromise.fromFn(async () => {
+                        const response = await sendRequest(controller.testRun, options, callsite);
+
+                        return response[getter];
+                    }),
+                });
+            });
+
+            return promise;
+        };
+    }
+
+    _decorateRequestFunction (fn) {
+        RequestCommand.extendedMethods.forEach(method => {
+            Object.defineProperty(fn, method, {
+                value: this._createRequestFunction({ method }),
+            });
+        });
+    }
+
+    [delegatedAPI(RequestCommand.methodName, 'getter')] () {
+        const fn = this._createRequestFunction();
+
+        this._decorateRequestFunction(fn);
+
+        return fn;
     }
 
     [delegatedAPI(ClickCommand.methodName)] (selector, options) {
-        return this._enqueueCommand(ClickCommand, { selector, options });
+        return this.enqueueCommand(ClickCommand, { selector, options });
     }
 
     [delegatedAPI(RightClickCommand.methodName)] (selector, options) {
-        return this._enqueueCommand(RightClickCommand, { selector, options });
+        return this.enqueueCommand(RightClickCommand, { selector, options });
     }
 
     [delegatedAPI(DoubleClickCommand.methodName)] (selector, options) {
-        return this._enqueueCommand(DoubleClickCommand, { selector, options });
+        return this.enqueueCommand(DoubleClickCommand, { selector, options });
     }
 
     [delegatedAPI(HoverCommand.methodName)] (selector, options) {
-        return this._enqueueCommand(HoverCommand, { selector, options });
+        return this.enqueueCommand(HoverCommand, { selector, options });
     }
 
     [delegatedAPI(DragCommand.methodName)] (selector, dragOffsetX, dragOffsetY, options) {
-        return this._enqueueCommand(DragCommand, { selector, dragOffsetX, dragOffsetY, options });
+        return this.enqueueCommand(DragCommand, { selector, dragOffsetX, dragOffsetY, options });
     }
 
     [delegatedAPI(DragToElementCommand.methodName)] (selector, destinationSelector, options) {
-        return this._enqueueCommand(DragToElementCommand, { selector, destinationSelector, options });
+        return this.enqueueCommand(DragToElementCommand, { selector, destinationSelector, options });
     }
 
     _getSelectorForScroll (args) {
@@ -262,7 +395,7 @@ export default class TestController {
         if (typeof args[0] === 'number')
             [ x, y, options ] = args;
 
-        return this._enqueueCommand(ScrollCommand, { selector, x, y, position, options });
+        return this.enqueueCommand(ScrollCommand, { selector, x, y, position, options });
     }
 
     [delegatedAPI(ScrollByCommand.methodName)] (...args) {
@@ -270,23 +403,23 @@ export default class TestController {
 
         const [byX, byY, options] = args;
 
-        return this._enqueueCommand(ScrollByCommand, { selector, byX, byY, options });
+        return this.enqueueCommand(ScrollByCommand, { selector, byX, byY, options });
     }
 
     [delegatedAPI(ScrollIntoViewCommand.methodName)] (selector, options) {
-        return this._enqueueCommand(ScrollIntoViewCommand, { selector, options });
+        return this.enqueueCommand(ScrollIntoViewCommand, { selector, options });
     }
 
     [delegatedAPI(TypeTextCommand.methodName)] (selector, text, options) {
-        return this._enqueueCommand(TypeTextCommand, { selector, text, options });
+        return this.enqueueCommand(TypeTextCommand, { selector, text, options });
     }
 
     [delegatedAPI(SelectTextCommand.methodName)] (selector, startPos, endPos, options) {
-        return this._enqueueCommand(SelectTextCommand, { selector, startPos, endPos, options });
+        return this.enqueueCommand(SelectTextCommand, { selector, startPos, endPos, options });
     }
 
     [delegatedAPI(SelectTextAreaContentCommand.methodName)] (selector, startLine, startPos, endLine, endPos, options) {
-        return this._enqueueCommand(SelectTextAreaContentCommand, {
+        return this.enqueueCommand(SelectTextAreaContentCommand, {
             selector,
             startLine,
             startPos,
@@ -297,7 +430,7 @@ export default class TestController {
     }
 
     [delegatedAPI(SelectEditableContentCommand.methodName)] (startSelector, endSelector, options) {
-        return this._enqueueCommand(SelectEditableContentCommand, {
+        return this.enqueueCommand(SelectEditableContentCommand, {
             startSelector,
             endSelector,
             options,
@@ -305,30 +438,30 @@ export default class TestController {
     }
 
     [delegatedAPI(PressKeyCommand.methodName)] (keys, options) {
-        return this._enqueueCommand(PressKeyCommand, { keys, options });
+        return this.enqueueCommand(PressKeyCommand, { keys, options });
     }
 
     [delegatedAPI(WaitCommand.methodName)] (timeout) {
-        return this._enqueueCommand(WaitCommand, { timeout });
+        return this.enqueueCommand(WaitCommand, { timeout });
     }
 
     [delegatedAPI(NavigateToCommand.methodName)] (url) {
-        return this._enqueueCommand(NavigateToCommand, { url });
+        return this.enqueueCommand(NavigateToCommand, { url });
     }
 
     [delegatedAPI(SetFilesToUploadCommand.methodName)] (selector, filePath) {
-        return this._enqueueCommand(SetFilesToUploadCommand, { selector, filePath });
+        return this.enqueueCommand(SetFilesToUploadCommand, { selector, filePath });
     }
 
     [delegatedAPI(ClearUploadCommand.methodName)] (selector) {
-        return this._enqueueCommand(ClearUploadCommand, { selector });
+        return this.enqueueCommand(ClearUploadCommand, { selector });
     }
 
     [delegatedAPI(TakeScreenshotCommand.methodName)] (options) {
         if (options && typeof options !== 'object')
             options = { path: options };
 
-        return this._enqueueCommand(TakeScreenshotCommand, options);
+        return this.enqueueCommand(TakeScreenshotCommand, options);
     }
 
     [delegatedAPI(TakeElementScreenshotCommand.methodName)] (selector, ...args) {
@@ -343,47 +476,54 @@ export default class TestController {
         else
             commandArgs.path = args[0];
 
-        return this._enqueueCommand(TakeElementScreenshotCommand, commandArgs);
+        return this.enqueueCommand(TakeElementScreenshotCommand, commandArgs);
     }
 
     [delegatedAPI(ResizeWindowCommand.methodName)] (width, height) {
-        return this._enqueueCommand(ResizeWindowCommand, { width, height });
+        return this.enqueueCommand(ResizeWindowCommand, { width, height });
     }
 
     [delegatedAPI(ResizeWindowToFitDeviceCommand.methodName)] (device, options) {
-        return this._enqueueCommand(ResizeWindowToFitDeviceCommand, { device, options });
+        return this.enqueueCommand(ResizeWindowToFitDeviceCommand, { device, options });
     }
 
     [delegatedAPI(MaximizeWindowCommand.methodName)] () {
-        return this._enqueueCommand(MaximizeWindowCommand);
+        return this.enqueueCommand(MaximizeWindowCommand);
     }
 
     [delegatedAPI(SwitchToIframeCommand.methodName)] (selector) {
-        return this._enqueueCommand(SwitchToIframeCommand, { selector });
+        return this.enqueueCommand(SwitchToIframeCommand, { selector });
     }
 
     [delegatedAPI(SwitchToMainWindowCommand.methodName)] () {
-        return this._enqueueCommand(SwitchToMainWindowCommand);
+        return this.enqueueCommand(SwitchToMainWindowCommand);
     }
 
     [delegatedAPI(OpenWindowCommand.methodName)] (url) {
         this._validateMultipleWindowCommand(OpenWindowCommand.methodName);
 
-        return this._enqueueCommand(OpenWindowCommand, { url });
+        return this.enqueueCommand(OpenWindowCommand, { url });
     }
 
     [delegatedAPI(CloseWindowCommand.methodName)] (window) {
-        const windowId      = window?.id || null;
+        const windowId = window?.id || null;
 
         this._validateMultipleWindowCommand(CloseWindowCommand.methodName);
 
-        return this._enqueueCommand(CloseWindowCommand, { windowId });
+        return this.enqueueCommand(CloseWindowCommand, { windowId });
     }
 
     [delegatedAPI(GetCurrentWindowCommand.methodName)] () {
         this._validateMultipleWindowCommand(GetCurrentWindowCommand.methodName);
 
-        return this._enqueueCommand(GetCurrentWindowCommand);
+        return this.enqueueCommand(GetCurrentWindowCommand);
+    }
+
+    [delegatedAPI(GetCurrentCDPSessionCommand.methodName)] () {
+        const callsite = getCallsiteForMethod(GetCurrentCDPSessionCommand.methodName);
+        const command  = this._createCommand(GetCurrentCDPSessionCommand, {}, callsite);
+
+        return this.testRun.executeCommand(command, callsite);
     }
 
     [delegatedAPI(SwitchToWindowCommand.methodName)] (windowSelector) {
@@ -403,19 +543,19 @@ export default class TestController {
             args = { windowId: windowSelector?.id };
         }
 
-        return this._enqueueCommand(command, args);
+        return this.enqueueCommand(command, args);
     }
 
     [delegatedAPI(SwitchToParentWindowCommand.methodName)] () {
         this._validateMultipleWindowCommand(SwitchToParentWindowCommand.methodName);
 
-        return this._enqueueCommand(SwitchToParentWindowCommand);
+        return this.enqueueCommand(SwitchToParentWindowCommand);
     }
 
     [delegatedAPI(SwitchToPreviousWindowCommand.methodName)] () {
         this._validateMultipleWindowCommand(SwitchToPreviousWindowCommand.methodName);
 
-        return this._enqueueCommand(SwitchToPreviousWindowCommand);
+        return this.enqueueCommand(SwitchToPreviousWindowCommand);
     }
 
     _eval$ (fn, options) {
@@ -429,31 +569,34 @@ export default class TestController {
     }
 
     [delegatedAPI(SetNativeDialogHandlerCommand.methodName)] (fn, options) {
-        return this._enqueueCommand(SetNativeDialogHandlerCommand, {
+        return this.enqueueCommand(SetNativeDialogHandlerCommand, {
             dialogHandler: { fn, options },
         });
     }
 
     [delegatedAPI(GetNativeDialogHistoryCommand.methodName)] () {
         const callsite = getCallsiteForMethod(GetNativeDialogHistoryCommand.methodName);
+        const command  = this._createCommand(GetNativeDialogHistoryCommand, {}, callsite);
 
-        return this.testRun.executeCommand(new GetNativeDialogHistoryCommand(), callsite);
+        return this.testRun.executeCommand(command, callsite);
     }
 
     [delegatedAPI(GetBrowserConsoleMessagesCommand.methodName)] () {
         const callsite = getCallsiteForMethod(GetBrowserConsoleMessagesCommand.methodName);
+        const command  = this._createCommand(GetBrowserConsoleMessagesCommand, {}, callsite);
 
-        return this.testRun.executeCommand(new GetBrowserConsoleMessagesCommand(), callsite);
+        return this.testRun.executeCommand(command, callsite);
     }
 
-    _checkForExcessiveAwaits (snapshotPropertyCallsites, checkedCallsite) {
-        const callsiteId = getCallsiteId(checkedCallsite);
+    checkForExcessiveAwaits (checkedCallsite, { actionId }) {
+        const snapshotPropertyCallsites = this.testRun.observedCallsites.snapshotPropertyCallsites;
+        const callsiteId                = getCallsiteId(checkedCallsite);
 
         // NOTE: If there are unasserted callsites, we should add all of them to awaitedSnapshotWarnings.
         // The warnings themselves are raised after the test run in wrap-test-function
         if (snapshotPropertyCallsites[callsiteId] && !snapshotPropertyCallsites[callsiteId].checked) {
             for (const propertyCallsite of snapshotPropertyCallsites[callsiteId].callsites)
-                this.testRun.observedCallsites.awaitedSnapshotWarnings.set(getCallsiteStackFrameString(propertyCallsite), propertyCallsite);
+                this.testRun.observedCallsites.awaitedSnapshotWarnings.set(getCallsiteStackFrameString(propertyCallsite), { callsite: propertyCallsite, actionId });
 
             delete snapshotPropertyCallsites[callsiteId];
         }
@@ -464,85 +607,49 @@ export default class TestController {
     [delegatedAPI(AssertionCommand.methodName)] (actual) {
         const callsite = getCallsiteForMethod(AssertionCommand.methodName);
 
-        this._checkForExcessiveAwaits(this.testRun.observedCallsites.snapshotPropertyCallsites, callsite);
-
-        if (isClientFunction(actual))
-            addWarning(this.warningLog, WARNING_MESSAGE.assertedClientFunctionInstance, callsite);
-        else if (isSelector(actual))
-            addWarning(this.warningLog, WARNING_MESSAGE.assertedSelectorInstance, callsite);
-
         return new Assertion(actual, this, callsite);
     }
 
-    [delegatedAPI(DebugCommand.methodName)] () {
-        // NOTE: do not need to enqueue the Debug command if we are in compiler service debugging mode
-        // the Debug command will be executed by CDP
-        return this.isCompilerServiceMode() ? void 0 : this._enqueueCommand(DebugCommand);
+    [delegatedAPI(DebugCommand.methodName)] (selector) {
+        return this.enqueueCommand(DebugCommand, { selector });
     }
 
     [delegatedAPI(SetTestSpeedCommand.methodName)] (speed) {
-        return this._enqueueCommand(SetTestSpeedCommand, { speed });
+        return this.enqueueCommand(SetTestSpeedCommand, { speed });
     }
 
     [delegatedAPI(SetPageLoadTimeoutCommand.methodName)] (duration) {
-        addWarning(this.warningLog, getDeprecationMessage(DEPRECATED.setPageLoadTimeout));
-
-        return this._enqueueCommand(SetPageLoadTimeoutCommand, { duration });
+        return this.enqueueCommand(SetPageLoadTimeoutCommand, { duration }, (testController, command) => {
+            addWarning(testController.warningLog, { message: getDeprecationMessage(DEPRECATED.setPageLoadTimeout), actionId: command.actionId });
+        });
     }
 
     [delegatedAPI(UseRoleCommand.methodName)] (role) {
-        return this._enqueueCommand(UseRoleCommand, { role });
+        return this.enqueueCommand(UseRoleCommand, { role });
     }
 
-    _addRequestHooks$ (...hooks) {
-        return this._enqueueTask('addRequestHooks', () => {
-            hooks = flatten(hooks);
-
-            assertRequestHookType(hooks);
-
-            hooks.forEach(hook => this.testRun.addRequestHook(hook));
-        });
+    [delegatedAPI(SkipJsErrorsCommand.methodName)] (options) {
+        return this.enqueueCommand(SkipJsErrorsCommand, { options });
     }
 
-    _removeRequestHooks$ (...hooks) {
-        return this._enqueueTask('removeRequestHooks', () => {
-            hooks = flatten(hooks);
+    [delegatedAPI(AddRequestHooksCommand.methodName)] (...hooks) {
+        hooks = flattenDeep(hooks);
 
-            assertRequestHookType(hooks);
-
-            hooks.forEach(hook => this.testRun.removeRequestHook(hook));
-        });
+        return this.enqueueCommand(AddRequestHooksCommand, { hooks });
     }
 
-    static enableDebugForNonDebugCommands () {
-        inDebug = true;
+    [delegatedAPI(RemoveRequestHooksCommand.methodName)] (...hooks) {
+        hooks = flattenDeep(hooks);
+
+        return this.enqueueCommand(RemoveRequestHooksCommand, { hooks });
     }
 
-    static disableDebugForNonDebugCommands () {
-        inDebug = false;
+    [delegatedAPI(ReportCommand.methodName)] (...args) {
+        return this.enqueueCommand(ReportCommand, { args });
     }
-
     shouldStop (command) {
-        // NOTE: should never stop in not compliler debugging mode
-        if (!this.isCompilerServiceMode())
-            return false;
-
         // NOTE: should always stop on Debug command
-        if (command === 'debug')
-            return true;
-
-        // NOTE: should stop on other actions after the `Next Action` button is clicked
-        if (inDebug) {
-            inDebug = false;
-
-            return true;
-        }
-
-        return false;
-    }
-
-    isCompilerServiceMode () {
-        return this.testRun instanceof TestRunProxy;
+        return command === 'debug';
     }
 }
 

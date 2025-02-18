@@ -1,5 +1,1123 @@
 # Changelog
 
+## v3.7.2 (2025-02-18)
+
+### Bug Fixes
+
+* TestCafe incorrectly processes angular functions in proxy mode. ([3035](https://github.com/DevExpress/testcafe-hammerhead/issues/3035))
+* A browser throws a SyntaxError in proxy mode. ([8368](https://github.com/DevExpress/testcafe/issues/8368))
+* Docker Image cannot run test for pages in foreign languages. ([8362](https://github.com/DevExpress/testcafe/issues/8362))
+* [Native Automation] TestCafe does not maximize the window after a resizeMethod call. ([8360](https://github.com/DevExpress/testcafe/issues/8360))
+* lru-cache conflicts with TypeScript's latest types. ([3036](https://github.com/DevExpress/testcafe-hammerhead/issues/3036))
+
+## v3.7.1 (2024-12-18)
+
+### Bug Fixes
+
+* The 'click' event is raised when a draggable element was dropped. ([8250](https://github.com/DevExpress/testcafe/issues/8250))
+* Unable to type text in the CodeMirror editor after it was clicked. ([8321](https://github.com/DevExpress/testcafe/issues/8321))
+* Angular functions can work incorrectly in proxy mode. ([8221](https://github.com/DevExpress/testcafe/issues/8221))
+
+## TestCafe v3.7.0 Released
+
+The TestCafe v3.7.0 update includes the capability to use `Metadata` as an interface, `esm` configuration file option, and a number of bug fixes.
+
+meta-readmore
+
+### Declare Metadata Interface
+
+Earlier versions of TestCafe supported `Metadata` as a type. In TestCafe v3.7.0 and higher, you should declare `Metadata` as an interface.
+
+```js
+// testcafe.global.d.ts
+declare module "testcafe" {
+	global {
+		interface Metadata {
+			manual?: boolean,
+		}
+	}
+}
+```
+
+### New Configuration File Option: esm
+
+Earlier versions of TestCafe supported the [ESM Module](https://testcafe.io/documentation/404258/guides/advanced-guides/esm-module-support) from the CLI only. In TestCafe v3.7.0 and higher, you can use the [esm](https://testcafe.io/documentation/402638/reference/configuration-file#esm) configuration file option. Note that this option **only works** with Node.js 18.19-18.xx, and 20.8.0 and up.
+
+### Bug Fixes
+
+* CDP client tab creation causes a `WebSocket connection closed` error in Chrome v130 ([#8286](https://github.com/DevExpress/testcafe/issues/8286)).
+* An unhandled promise rejection occurs while launching sub-windows ([#8258](https://github.com/DevExpress/testcafe/issues/8258)).
+* Assertions that perform visibility checks fail despite elements being visible on the page ([#8237](https://github.com/DevExpress/testcafe/issues/8237)).
+* The [t.getCurrentCDPSession](https://testcafe.io/documentation/404913/reference/test-api/testcontroller/getcurrentcdpsession) method returns `unknown` ([#8228](https://github.com/DevExpress/testcafe/issues/8228)).
+* [Native Automation] Request hooks are applied to skipped tests ([#8229](https://github.com/DevExpress/testcafe/issues/8229)).
+* A `WebSocket connection closed` error occurs while running TestCafe in Chrome v127. The updated version includes the `--disable-search-engine-choice-screen` flag ([#8240](https://github.com/DevExpress/testcafe/issues/8240)).
+* A `leaveElement` method call causes an error when the `prevElement` object is removed from the DOM ([#8264](https://github.com/DevExpress/testcafe/issues/8264)).
+
+## v3.6.2 (2024-07-02)
+
+### Bug Fixes
+
+* [Native Automation] TestCafe incorrectly uploads files in Chrome v125 and up. ([#8198](https://github.com/DevExpress/testcafe/issues/8198))
+* TestCafe dependencies include the vulnerable endpoint-utils package ([#8207](https://github.com/DevExpress/testcafe/issues/8207)). The updated version includes the address package instead.
+
+## v3.6.1 (2024-06-10)
+
+### Bug Fixes
+
+* TestCafe incorrectly calculates the dimensions of multi-line elements. ([#8179](https://github.com/DevExpress/testcafe/issues/8179))
+* TestCafe incorrectly executes the `resizeWindow` method if you maximize the target window first. ([#8157](https://github.com/DevExpress/testcafe/issues/8157))
+
+## TestCafe v3.6.0 Released
+
+The TestCafe v3.6.0 update includes two minor changes and a number of bug fixes.
+
+## New method: t.getCurrentCDPSession
+
+The [t.getCurrentCDPSession](xref:404913) method allows native automation users to examine and control the CDP connection between TestCafe and the browser.
+
+Use the method to obtain the Chrome DevTools Protocol object for the current session. The CDP object exposes [properties and methods](https://chromedevtools.github.io/devtools-protocol/) that pertain to the CDP connection between TestCafe and the active browser window.
+
+```js
+fixture `Get current CDP session`
+    .page('https://devexpress.github.io/testcafe/example');
+
+test(`Get current CDP session`, async t => {
+    const mainWindowId = await t.testRun.activeWindowId;
+
+    let clientCDP = await t.getCurrentCDPSession();
+
+    await t.expect(clientCDP.webSocketUrl).contains(mainWindowId);
+}
+```
+
+## Headless browser connection
+
+TestCafe v3.6.0 takes advantage of the recent [Chromium headless mode upgrade](https://developer.chrome.com/docs/chromium/new-headless). The new headless mode offers better reliability and higher emulation accuracy.
+
+The headless mode upgrade may cause unexpected changes to your tests' behavior. Take note of the following changes:
+
+* Headless Chromium now automatically upgrades insecure HTTP requests to HTTPS.
+* Headless Chromium does not always honor the `--window-size` flag. This behavior is a [known Chromium bug](https://issues.chromium.org/issues/40256833).
+
+## Bug Fixes
+
+1. [Native automation] TestCafe does not execute the `maximizeWindow()` method in beforeEach hooks ([#8117](https://github.com/DevExpress/testcafe/issues/8117))
+2. If TestCafe launch options include `--esm`, the framework crashes on launch in environments with Node.JS v20 and up ([#8132](https://github.com/DevExpress/testcafe/issues/8132))
+3. The Linux-based Docker image of TestCafe cannot run tests in headless Chromium ([#8145](https://github.com/DevExpress/testcafe/issues/8145))
+4. TestCafe incorrectly crops Safari screenshots ([#8154](https://github.com/DevExpress/testcafe/issues/8154))
+
+## v3.5.0 (2023-12-26)
+
+TestCafe v3.5.0 includes multiple enhancements and bug fixes. Pass Selector queries to the Visual Selector Debugger, explore new ways to specify screenshot path patterns, and use a new *experimental* flag to run multi-window tests with native automation!
+
+meta-readmore
+
+### Pass Selector queries to the Visual Selector Debugger
+
+When you pass a Selector query to the [t.debug()](xref:402707) method, TestCafe uses the query to populate the input field of the Visual Selector Debugger. The debugger highlights page elements that match the query.
+
+```js
+t.debug(Selector('#header'));
+```
+
+>[!Video https://www.screencast.com/users/testcafe/folders/Default/media/4274d757-f7a4-4982-add4-43bb0ba35cff/embed]
+
+### Use a custom path pattern for screenshots of failed tests
+
+The `pathPatternOnFails` [screenshot option](xref:402639#-s---screenshots-optionvalueoption2value2) allows TestCafe users to define a separate set of naming rules for screenshots taken on test failure. You can store these screenshots in a different folder, or add a common, recognizable element to their filenames. You can use this option on its own, or in conjunction with the `pathPattern` property.
+
+```json
+{
+    "screenshots": {
+        "pathPatternOnFails": "${DATE}_${TIME}/failedTests/test-${TEST_INDEX}/${USERAGENT}/${FILE_INDEX}.png"
+    }
+}
+```
+
+### Specify a path pattern for individual screenshots
+
+Use the `pathPattern` option of the [t.takeScreenshot](xref:402675) action to specify a custom naming pattern for an individual screenshot:
+
+```js
+t.takeScreenshot({
+    pathPattern: "${DATE}_${TIME}/checkout-screenshot.png",
+    fullPage: true
+})
+```
+
+### (Experimental) Run multi-window tests with native automation
+
+TestCafe v2.5.0 was the first version of TestCafe to include [native automation](xref:404237) --- the capability to automate Chromium-based browsers with the native Chrome Debugging Protocol. This approach offers greater test stability and speed, but has a fair share of limitations. One of them is its incompatibility with multi-window tests.
+
+TestCafe v3.5.0 offers an experimental solution for this issue --- the [--experimental-multiple-windows](xref:402639#--experimental-multiple-windows) CLI flag. If you enable this flag, you can run multi-window tests with the native automation engine.
+
+The `--experimental-multiple-windows` mode does not support tests that include the following:
+
+* Pop-up windows that launch file downloads.
+* Browser window resizing.
+* Screenshots.
+* Video recording.
+
+Please do not use the `--experimental-multiple-windows` flag in production or for business-critical tasks.
+
+### Bug Fixes
+
+* TypeScript compilation fails if project dependencies include '&#64;babel/plugin-transorm-runtime' v7.23.3 or greater ([#8091](https://github.com/DevExpress/testcafe/issues/8091)).
+* If you enable concurrent test execution, TestCafe launches tests before the conclusion of the `fixture.before` hook ([#6999](https://github.com/DevExpress/testcafe/issues/6999)).
+* The `Fixture.disableConcurrency` method does not disable concurrent test execution ([8087](https://github.com/DevExpress/testcafe/issues/8087)).
+* TestCafe ignores the fullPage option when it takes screenshots on test failure ([#7761](https://github.com/DevExpress/testcafe/issues/7761)).
+* [Native Automation] TestCafe cannot populate file input fields with the `required` attribute ([#8079](https://github.com/DevExpress/testcafe/issues/8079)).
+* [Native Automation] TestCafe fails to execute tests that use service workers ([#8005](https://github.com/DevExpress/testcafe/issues/8005), [#8054](https://github.com/DevExpress/testcafe/issues/8054)).
+* When an action target is obscured by a sticky element, TestCafe incorrectly calculates the scroll distance necessary to interact with the target. ([#7377](https://github.com/DevExpress/testcafe/issues/7377)).
+* Incorrect processing of front-end scripts causes automation errors ([#7713](https://github.com/DevExpress/testcafe/issues/7713), [#8067](https://github.com/DevExpress/testcafe/issues/8067), [testcafe-hammerhead#2969](https://github.com/DevExpress/testcafe-hammerhead/issues/2969)).
+* TestCafe incorrectly processes failing network requests when it runs on Node.js v16 and greater ([#7097](https://github.com/DevExpress/testcafe/issues/7097)).
+* TestCafe incorrectly handles native dialogs in Mozilla Firefox ([#6815](https://github.com/DevExpress/testcafe/issues/6815)).
+
+## v3.4.0 (2023-11-09)
+
+TestCafe v3.4.0 introduces relative Role URLs, the ability to disable concurrency on a per-fixture basis, as well as other improvements and bug fixes.
+
+meta-readmore
+
+### Enhancements
+
+### Relative Role URLs
+
+Earlier versions of TestCafe did not support relative URLs for [Role log-in pages](xref:402845). In TestCafe v3.4.0 and higher, if you set the [baseUrl](xref:402638#base-url) configuration file parameter or the [--base-url](xref:402639#--base-url) CLI option, you can set a relative URL for a Role log-in page:
+
+```js
+import { Role } from 'testcafe';
+
+const userOne = Role('./login', async t => {
+    /* log-in actions go here */
+});
+```
+
+### Disable concurrency on a per-fixture basis
+
+[Concurrent test execution](xref:403626) is not suitable for tests that can only run in a certain order. To ignore the global concurrency setting for a particular fixture, use the [disableConcurrency](xref:404618) fixture method.
+
+```js
+fixture`Fixture.disableConcurrency`
+    .page`https://devexpress.github.io/testcafe/example/`
+    .disableConcurrency;
+```
+
+### Development Mode Enhancements
+
+When you debug code inside a browser, the browser can appear unresponsive. Earlier versions of TestCafe automatically relaunched unresponsive browsers, including browsers that were used for debugging.
+
+TestCafe v3.4.0 *does not* relaunch unresponsive browsers if you enter [development mode](xref:402638#developmentmode).
+
+### Debug Panel Enhancements
+
+The [debug panel](xref:404288) includes a new "Hide Picker" button. Click this button to disable the Selector Debugger and hide the Selector input field.
+
+![Hide the Selector input field](https://testcafe.io/images/inspector/hide-selector-picker.gif)
+
+### Bug Fixes
+
+* TestCafe incorrectly logs requests during concurrent test execution ([#7977](https://github.com/DevExpress/testcafe/issues/7977)).
+* TestCafe does not load images with non-lowercase `srcset` attribute declarations ([testcafe-hammerhead#2958](https://github.com/DevExpress/testcafe-hammerhead/issues/2958)).
+* TestCafe raises an unexpected client-side error when the application opens an `ngx-formly` form ([#7758](https://github.com/DevExpress/testcafe/issues/7758)).
+* TestCafe cannot interact with page items at the edge of the viewport when the browser emulates a mobile device ([#8057](https://github.com/DevExpress/testcafe/issues/8057)).
+
+
+## v3.3.0 (2023-08-29)
+
+TestCafe v3.3.0 includes important bug fixes and quality of life improvements.
+
+### Bug Fixes
+
+* TestCafe terminates the test run when it attempts to parse an empty JSON file ([#7935](https://github.com/DevExpress/testcafe/issues/7935)).
+* Firefox throws an unexpected error when TestCafe attempts to close the browser window ([#7285](https://github.com/DevExpress/testcafe/issues/7285)).
+* [Native Automation] TestCafe ignores the `--disable-multiple-windows` option when you interact with a link that points to "target=_blank", or open a new window with the `window.open` method ([#7916](https://github.com/DevExpress/testcafe/issues/7916)).
+* [Native Automation] TestCafe ignores the clientScripts directive when you mock HTTP requests ([#7914](https://github.com/DevExpress/testcafe/issues/7914)).
+* [Native Automation] TestCafe hangs when it runs tests in the headless version of Google Chrome ([#7898](https://github.com/DevExpress/testcafe/issues/7898)).
+* [Native Automation] TestCafe doesn't throw an error when the user attempts to enable the `userProfile` option ([#7925](https://github.com/DevExpress/testcafe/issues/7925)).
+
+## v3.2.0 (2023-08-17)
+
+TestCafe v3.2.0 allows you to check whether TestCafe uses native automation to control the browser.
+
+### Check your native automation status
+
+The `nativeAutomation` property of the [t.browser](https://testcafe.io/documentation/402712/reference/test-api/testcontroller/browser) object indicates whether TestCafe uses native automation to control the browser. The property's value is `true` when TestCafe uses native automation and `false` when TestCafe uses the Hammerhead proxy.
+
+You can check the browser's native automation status before you start the test:
+
+```js
+import { Selector } from 'testcafe';
+
+fixture`TestController.browser`
+    .page`https://example.com`;
+
+test('Native automation check', async t => {
+    await t.expect(t.browser.nativeAutomation).ok();
+    //the test continues only if you use native automation
+});
+```
+
+### Bug Fixes
+
+* TestCafe uses a version of the `error-stack-parser` package that contains a vulnerable dependency ([PR #7919](https://github.com/DevExpress/testcafe/pull/7919) by [@sethidden](https://github.com/sethidden)).
+* TestCafe does not clear cookie storage if a Role activation URL is the same as the page URL ([#7874](https://github.com/DevExpress/testcafe/issues/7874)).
+* [Native Automation] TestCafe incorrectly processes web pages with file inputs ([#7886](https://github.com/DevExpress/testcafe/issues/7886)).
+
+## v3.1.0 (2023-07-27)
+
+TestCafe v3.1.0 introduces two enhancements:
+
+* You can now respond to geolocation requests with the `t.setNativeDialogHandler` method.
+* Your tests and test reports can now reference a variable that stores the framework's version number.
+
+### Respond to geolocation requests
+
+> Main article: [t.setNativeDialogHandler](https://testcafe.io/documentation/402684/reference/test-api/testcontroller/setnativedialoghandler)
+
+Use the `t.setNativeDialogHandler` method to respond to `geolocation` requests. 
+
+* Return an `Error` type object to **Block** geolocation requests. 
+* Return an object with [coordinates](https://developer.mozilla.org/en-US/docs/Web/API/GeolocationPosition) to trigger the `success` callback of the [getCurrentPosition](https://developer.mozilla.org/en-US/docs/Web/API/Geolocation/getCurrentPosition) method.
+
+```js
+// Test
+test('Switch from "allow" to "block"', async t => {
+  await t
+    .setNativeDialogHandler((type) => {
+        if (type === 'geolocation')
+            return { timestamp: 12356, accuracy: 20, coords: {latitude: '34.15321262322903', longitude: '-118.25543996370723'}; // Passes this data to geolocation requests
+        return null;
+    });
+    .click('#buttonGeo')
+    .setNativeDialogHandler((type) => {
+        if (type !== 'geolocation')
+            return null;
+    
+        const err = new Error('Some error');
+    
+        err.code = 1;
+    
+        return err; // Blocks geolocation requests
+    })
+    .click('#buttonGeo');
+```
+
+### Reference the framework's version in tests and test reports
+
+> Main article: [Version Logger API](https://testcafe.io/documentation/404469/reference/version-logger-api)
+
+Earlier versions of TestCafe could output the framework's version number to the console:
+
+![CLI version](https://testcafe.io/images/testcafe-version.png)
+
+TestCafe 3.1.0 and up allows you to access the framework's version number in test code:
+
+```js
+import { version } from 'testcafe';
+console.log(`TestCafe version: ${version}`);
+```
+
+![API version](https://testcafe.io/images/output-testcafe-version.png)
+
+To access the framework's version number in your custom reporter, reference the first argument (`version`) of the `init` method:
+
+```js
+init (version) {
+   this
+      .write(`Using TestCafe ${version}`)
+      .newline()
+}
+```
+
+### Bug fixes
+
+* TestCafe incorrectly reports test duration in concurrency mode ([#1816](https://github.com/DevExpress/testcafe/issues/1816)).
+* TestCafe assigns a non-zero duration value to skipped tests, which leads to an unexpected increase in the total test run duration value ([#7731](https://github.com/DevExpress/testcafe/issues/7731)).
+* [Native Automation] The `setFileUpload` method does not work ([#7832](https://github.com/DevExpress/testcafe/issues/7832)).
+* [Native Automation] Request hooks cause tests to crash ([#7846](https://github.com/DevExpress/testcafe/issues/7846
+)).
+* [Native Automation] TestCafe overrides page titles ([#7833](https://github.com/DevExpress/testcafe/issues/7833)).
+* [Native Automation] If a website redirects the user to a new page before basic HTTP authentication is complete, the authentication process fails ([#7852](https://github.com/DevExpress/testcafe/issues/7852)).
+* [Native Automation] The `t.click` action fails if the event handler accounts for [pointer input pressure](https://developer.mozilla.org/en-US/docs/Web/API/PointerEvent/pressure) ([#7867](https://github.com/DevExpress/testcafe/issues/7867)).
+* [Native Automation] TestCafe hangs when the browser yields a "Session with given ID not found" error ([#7865](https://github.com/DevExpress/testcafe/issues/7865),[#7810](https://github.com/DevExpress/testcafe/issues/7810)).
+* [Native Automation] TestCafe cannot set the `httpOnly` flag when you use the `t.setCookies` method ([#7793](https://github.com/DevExpress/testcafe/issues/7793)).
+
+## v3.0.1 (2023-06-29)
+
+### Bug fixes
+
+* The TestCafe status bar overlaps page elements, which leads to test execution issues ([#7797](https://github.com/DevExpress/testcafe/issues/7797))
+* TestCafe outputs an unhelpful warning message when it cannot apply the artifact path template ([#7256](https://github.com/DevExpress/testcafe/issues/7256))
+* A bug in the testcafe-browser-tools package causes TestCafe tests to hang on Ubuntu ([#7752](https://github.com/DevExpress/testcafe/issues/7752))
+
+## v3.0.0 (2023-06-21)
+
+This major update includes two **breaking changes**:
+* TestCafe v3.0.0 uses native CDP automation to run tests in Chromium-based browsers.
+* TestCafe v3.0.0 removes support for Internet Explorer.
+
+Other changes include:
+* You can now access test and fixture data in hooks.
+* You can now dismiss the `print` dialog with the native dialog handler.
+
+### Native automation
+
+TestCafe v2.5.0 introduced an *experimental* mode that allows users to automate Chromium-based browsers, such as Google Chrome and Microsoft Edge, with the native CDP protocol. TestCafe v3.0.0 and up enables this capability out of the box.
+
+Native automation increases test quality, stability, and speed.
+
+* Read the ["TestCafe goes native"](https://testcafe.io/404431/resources/blog/2023-6-21-testcafe-goes-native) announcement for more information on the benefits of the new approach. 
+* Read the [Native Automation FAQ](https://testcafe.io/documentation/404237/guides/intermediate-guides/native-automation-mode) for more information on the practical aspects of this capability.
+
+### Access Test and Fixture data in hooks
+
+You can now access the following data in fixture hooks (`fixture.before`, `fixture.after`) :
+
+* Fixture name
+* Fixture metadata
+* Fixture path
+
+Test hooks (`fixture.beforeEach`, `fixture.afterEach`, `test.before`, `test.after`) can access fixture data **and** the following test data:
+
+* Test name
+* Test metadata
+
+```js
+fixture `Example Fixture`
+    .page `http://example.com`
+    .meta({ fixtureMeta: 'v' })
+    .before( async (ctx, info) => {
+        const fixtureName = info.name; /* Example Fixture */
+        const fixtureMeta = info.meta; /* { fixtureMeta: 'v' } */
+        const fixturePath = info.path /* /Users/dan/testcafe/fixture.js */
+    });
+    .beforeEach( async t => {
+        const fixtureName = t.fixture.name; /* Example Fixture */
+        const fixtureMeta = t.fixture.meta; /* { fixtureMeta: 'v' } */
+        const fixturePath = t.fixture.path /* /Users/dan/testcafe/fixture.js */
+        const testName = t.test.name; /* MyTest */
+        const testMeta = t.test.meta; /* { 'key': 'value' } */
+})
+```
+
+Read the [Hooks guide](https://testcafe.io/documentation/403435/guides/intermediate-guides/hooks#access-fixture-and-test-data-in-hooks) for more information.
+
+### Dismiss the print dialog
+
+You can now use the [t.setNativeDialogHandler](https://testcafe.io/documentation/402684/reference/test-api/testcontroller/setnativedialoghandler) method to dismiss the print dialog.
+
+### Removed: Internet Explorer support
+
+TestCafe v3.0.0 removes support for Internet Explorer 11, six months after the browser's official [retirement](https://techcommunity.microsoft.com/t5/windows-it-pro-blog/internet-explorer-11-desktop-app-retirement-faq/ba-p/2366549). The browser came out more than 9 years ago, and has a worldwide market of less than [0.5%](https://gs.statcounter.com/browser-market-share). It is survived by Edge, a popular Chromium-based browser that ships with modern versions of Windows.
+
+### Bug fixes
+
+* Some client functions yield a fatal error when the test navigates to a new page or removes an iframe ([#7707](https://github.com/DevExpress/testcafe/issues/7707)).
+* TestCafe fails to correctly modify certain request headers when it uses native automation ([#7748](https://github.com/DevExpress/testcafe/issues/7748)).
+* A bug in the CDP protocol causes TestCafe to incorrectly process request hooks ([#7743](https://github.com/DevExpress/testcafe/issues/7743)).
+* TestCafe outputs a vague error message if the framework fails to read or process the configuration file ([#7208](https://github.com/DevExpress/testcafe/issues/7208), [#6437](https://github.com/DevExpress/testcafe/issues/6437)).
+* TestCafe cannot select content with the "Ctrl+A" shortcut when the framework uses native automation ([#7667](https://github.com/DevExpress/testcafe/issues/7667)).
+* The Monaco editor does not display code completion hints when TestCafe automates it with CDP [#7770](https://github.com/DevExpress/testcafe/issues/7770).
+
+## v2.6.2 (2023-06-01)
+
+TestCafe v2.6.2 introduces a number of bug fixes.
+
+### Bug fixes
+
+* Internet Explorer 11 hangs because it cannot process client-side scripts that ship with TestCafe v2.6.1  ([#7741](https://github.com/DevExpress/testcafe/issues/7741)).
+* The `pressKey('space')` action doesn't affect checkbox status in Firefox ([#6969](https://github.com/DevExpress/testcafe/issues/6969)).
+
+## v2.6.1 (2023-05-29)
+
+TestCafe v2.6.1 retires **Experimental Debug** mode, and introduces a number of important bug fixes.
+
+### Removed: Experimental debug mode
+
+TestCafe v1.18.0 introduced [Experimental Debug mode](https://testcafe.io/403664/release-notes/framework/2021-12-22-testcafe-v1-18-0-released) --- a way to debug Selectors and Client Functions in the text editor. TestCafe v2.4.0 shipped with the [Visual Selector Debugger](https://testcafe.io/documentation/404288/guides/intermediate-guides/visual-selector-debugger), which allows users to troubleshoot Selector queries directly in the browser.
+
+The two capabilities serve the same purpose, but the Visual Selector Debugger is more user-friendly. As such, beginning with TestCafe v2.6.1, the framework **no longer includes** Experimental Debug mode. Thank you to all the TestCafe users who tried out the capability.
+
+### Bug fixes
+
+* When TestCafe runs in Native Automation mode, Request Hooks yield an error ([#7683](https://github.com/DevExpress/testcafe/issues/7683)).
+* When TestCafe runs in Native Automation mode, the framework incorrectly processes pages with the pound sign ("#") in the URL ([#7652](https://github.com/DevExpress/testcafe/issues/7652)).
+* TestCafe incorrectly handles XHR headers in Native Automation mode ([#7664](https://github.com/DevExpress/testcafe/issues/7664), [#7686](https://github.com/DevExpress/testcafe/issues/7686), [#7645](https://github.com/DevExpress/testcafe/issues/7645)).
+* TestCafe reports an incorrect browser alias when it runs tests in Microsoft Edge ([#7647](https://github.com/DevExpress/testcafe/issues/7647)).
+* TestCafe fails to intercept all HTTP requests when it runs in Native Automation mode. ([#7640](https://github.com/DevExpress/testcafe/issues/7640)).
+* TestCafe cannot resize browser windows in the latest version of Chrome for macOS ([#7684](https://github.com/DevExpress/testcafe/issues/7684)).
+* TestCafe incorrectly processes client-side styles, causing slowdowns and errors ([#6726](https://github.com/DevExpress/testcafe/issues/6726), [#6747](https://github.com/DevExpress/testcafe/issues/6747)).
+* TestCafe crashes when you use the TestCafe Test Runner API to launch multiple tests simultaneously ([#7711](https://github.com/DevExpress/testcafe/issues/7711)).
+
+## v2.6.0 (2023-05-11)
+
+TestCafe v2.6.0 introduces two enhancements: a new hook that allows users to modify reporter output, and support for JavaScript configuration files with the `.cjs` extension.
+
+### New reporter hook
+
+The [onBeforeWrite](https://testcafe.io/documentation/404388/guides/advanced-guides/modify-reporter-output) hook allows you to modify the output of a reporter.
+
+If you want your test reports to include custom content, you can create a custom reporter from scratch. However, this approach takes time and effort. Use the `onBeforeWrite` hook if you want to make minor changes to the output of an existing reporter.
+
+Define an `onBeforeWrite` hook in a JavaScript configuration file. The following hook adds the duration in milliseconds to every test entry in the report:
+
+```js
+//.testcaferc.js or .testcaferc.cjs
+function onBeforeWriteHook(writeInfo) { // This function will fire every time the reporter calls the "write" method.
+    if (writeInfo.initiator === 'reportTestDone') { // The "initiator" property contains the name of the reporter event that triggered the hook.
+         const {
+            name,
+            testRunInfo,
+            meta
+        } = writeInfo.data || {}; // If you attached this hook to a compatible reporter (such as "spec" or "list"), the hook can process data related to the event.
+        const testDuration = testRunInfo.durationMs; // Save the duration of the test.
+        writeInfo.formattedText = writeInfo.formattedText + ' (' + testDuration + 'ms)'; // Add test duration to the reporter output.
+    };
+}
+
+
+module.exports = { // Attach the hook
+    hooks: {
+        reporter: {
+            onBeforeWrite: {
+                'spec': onBeforeWriteHook, // This hook will fire when you use the default "spec" reporter.
+            },
+        },
+    },
+};
+```
+
+![Reporter hook demonstration](https://testcafe.io/images/reporter-hook.png)
+
+### CJS support
+
+If you run TestCafe v2.6.0 and higher, you can now use a configuration file with the `.cjs` file extension. TestCafe detects the `.testcaferc.cjs` file on startup, alongside its `.js` and `.json` counterparts.
+
+[TestCafe configuration files](https://testcafe.io/documentation/402638/reference/configuration-file) **only** support CommonJS syntax. Meanwhile, modern JavaScript tools often default to ESM syntax. If a JavaScript project is of type `module`, Node.js expects the project's `.js` files to contain ESM syntax.
+
+Use the `.cjs` configuration file extension to let Node.js know that the file contains CommonJS syntax.
+
+Many thanks to the TestCafe contributor Damien Guérin ([@gigaga](https://github.com/DevExpress/testcafe/pull/7614)) for the implementation of this capability.
+
+### Bug fixes
+
+* If you call the `t.skipJsErrors` method without arguments, TestCafe passes a `false` value to the method. This behavior is inconsistent with similar methods of a greater scope --- `test.skipJsErrors` and `fixture.skipJsErrors` ([#7648](https://github.com/DevExpress/testcafe/issues/7648)).
+* Users cannot disable the "quarantine mode" or "skipJsErrors" settings from the command line ([#7077](https://github.com/DevExpress/testcafe/issues/7077)).
+* TestCafe incorrectly processes exceptions of types other than `Error` ([#7627](https://github.com/DevExpress/testcafe/issues/7627)).
+* TestCafe does not consistently execute the `t.pressKey` action in Mozilla Firefox. Attempts to press the "backspace" key and the "tab" key, among others, may fail. ([#7623](https://github.com/DevExpress/testcafe/pull/7623))
+* When TestCafe runs in Native Automation mode, it incorrectly executes some instances of the `t.request` method. ([#7609](https://github.com/DevExpress/testcafe/issues/7609))
+* The TestCafe proxy incorrectly processes private class properties in client-side scripts, which leads to page load failure ([#7632](https://github.com/DevExpress/testcafe/issues/7632), PR by [@sorin-davidoi](https://github.com/sorin-davidoi)).
+
+## v2.5.0 (2023-04-06)
+
+TestCafe v2.5.0 introduces three major enhancements:
+* The new `t.report` method passes custom data to the test reporter.
+* The new `--native-automation` flag enables TestCafe to automate all Chromium-based browsers with the native CDP protocol.
+* The new `--esm` flag allows users to import ESM modules in test files.
+
+### t.report
+
+Include the [t.report()](https://testcafe.io/documentation/404350/reference/test-api/testcontroller/report) method in your test to pass custom data to the reporter.
+
+Specify arguments of any type (string, array, Object, etc). Separate arguments with a comma:
+
+```js
+await
+    t.report( 
+        'text', 
+        {'key': 'value'},
+        ['arrayItem1', 'arrayItem2']
+    );
+```
+
+The default `spec` reporter displays custom data after test completion, once for each browser that runs the test.
+
+![Report with custom data](https://testcafe.io/images/treport.png)
+
+### CDP Automation: Now Stable
+
+TestCafe v2.2.0 introduced an experimental [proxyless mode](https://testcafe.io/documentation/404237/guides/intermediate-guides/native-automation-mode) that automated Google Chrome with the native CDP protocol.
+
+For the v2.5.0 release, the TestCafe team addressed most issues that our users discovered when the capability was "experimental", and gave it a new name --- Native Automation mode.
+
+Unlike its predecessor, the Native Automation mode supports **all** Chromium-based browsers, including Microsoft Edge. Enable the `nativeAutomation` option in the [command line interface](https://testcafe.io/documentation/402639/reference/command-line-interface#--native-automation), the [configuration file](https://testcafe.io/documentation/402638/reference/configuration-file#nativeautomation), or the [runner.run()](https://testcafe.io/documentation/402655/reference/testcafe-api/runner/run#nativeautomation) function to try this capability. 
+
+> [!IMPORTANT]
+> TestCafe v2.5.0 removed the `experimentalProxyless` option from the [createTestCafe](https://testcafe.io/documentation/402662/reference/testcafe-api/global/createtestcafe) function. Use the [runner.run()](https://testcafe.io/documentation/402655/reference/testcafe-api/runner/run#nativeautomation) function to enable Native Automation mode from the TestCafe Test Runner API.
+
+### ESM Module Support: Now Stable
+
+TestCafe v2.5.0 **drops** the `experimental` prefix from the `--esm` [CLI flag](https://testcafe.io/documentation/402639/reference/command-line-interface#--esm). Enable the `--esm` flag to import modules that do not support CommonJS.
+
+```sh
+testcafe chrome test.js --esm
+```
+
+## v2.4.0 (2023-03-06)
+TestCafe v2.4.0 introduces the Visual Selector Debugger. You can now create and debug Selector queries in the browser window.
+
+### Visual Selector Debugger
+
+TestCafe v2.4.0 displays the Visual Selector Debugger panel when you activate [Debug Mode](https://testcafe.io/documentation/402835/guides/basic-guides/debug-tests). Use the panel to debug Selector queries from your test, or generate new Selector queries.
+
+![](https://testcafe.io/images/inspector/enter-query.gif)
+
+If a Selector query causes your test to fail, add the [t.debug()](https://testcafe.io/documentation/402707/reference/test-api/testcontroller/debug) command after the last successful action, and launch the test.
+
+When the test reaches the breakpoint, the window that runs the test displays the Selector Debugger panel. Copy the failing Selector query from test code to the Selector Debugger input field.
+
+* TestCafe highlights page elements that match the Selector query.
+* If no elements match the Selector query, the panel displays the **No Matching Elements** warning. 
+* If your Selector query contians a syntax error, the panel displays the **Invalid Selector** warning.
+
+To interactively generate a Selector query, click the **Pick** button, and select the target element on the page.
+
+For more information on the panel, its capabilities, and limitations, read the [Visual Selector Debugger Guide](https://testcafe.io/documentation/404288/guides/intermediate-guides/visual-selector-debugger).
+
+### Bug Fixes
+
+* TestCafe cannot execute the [t.request](https://testcafe.io/documentation/403981/reference/test-api/testcontroller/request) action in [proxyless mode](https://testcafe.io/documentation/404237/guides/experimental-capabilities/proxyless-mode) ([#7523](https://github.com/DevExpress/testcafe/issues/7523)).
+
+## v2.3.1 (2023-02-09)
+TestCafe v2.3.1 introduces a number of bug fixes.
+
+### Bug Fixes
+
+* Client-side code with optional chaining may trigger a TestCafe error ([#7387](https://github.com/DevExpress/testcafe/issues/7387)).
+* TestCafe cannot interact with images from the Shadow DOM ([#7454](https://github.com/DevExpress/testcafe/issues/7454)).
+* TestCafe v2.3.0 fails to launch when the `test.meta` method precedes test code ([#7482](https://github.com/DevExpress/testcafe/issues/7482)).
+* When TestCafe launches a headless instance of Google Chrome in proxyless mode, it cannot interact with elements that are overlapped by the status bar ([#7483](https://github.com/DevExpress/testcafe/issues/7483)).
+
+## v2.3.0 (2023-01-30)
+
+TestCafe v2.3.0 introduces `create-testcafe` --- an interactive tool that allows you to initialize a new TestCafe project in seconds. The update also includes *experimental* ECMAScript module support and a number of bug fixes.
+
+> **_IMPORTANT:_**
+> TestCafe v2.3.0 ends support for Node.js 14 due to a known vulnerability in the `babel-plugin-module-resolver` module.
+>
+> Install an up-to-date version of the Node.js runtime to use TestCafe v2.3.0 and up.
+> 
+> The official maintenance period for Node.js 14 [elapses](https://endoflife.date/nodejs) on April 1st, 2023. 
+
+
+### create-testcafe
+
+Use the [create-testcafe](https://github.com/devexpress/create-testcafe) tool to initialize a new TestCafe project, or *add* TestCafe to an existing Node.js application.
+
+Execute the following command to launch `create-testcafe`:
+
+```sh
+npx create-testcafe
+```
+
+![example](https://testcafe.io/images/create-testcafe/wizard.gif)
+
+The `create-testcafe` tool allows you to perform the following actions with a single command:
+
+1. Create a new folder for the TestCafe project *(optional)*.
+2. Create a new local installation of TestCafe and its dependencies.
+3. Create and initialize a TestCafe configuration file.
+4. Create a separate subfolder for tests.
+5. Populate the test folder with test examples *(optional)*.
+6. Create a YAML file with a GitLab Actions workflow that runs TestCafe tests *(optional)*.
+
+Read the [TestCafe Setup Wizard guide](https://testcafe.io/documentation/404259/guides/best-practices/create-testcafe) for more information on the create-testcafe tool.
+
+### Experimental: ECMAScript module support
+
+> **_IMPORTANT:_**
+> ESM module suppport works with Node.js 16 and up.
+
+TestCafe has always used *CommonJS* syntax for module imports:
+
+```js
+const { x } = require('y');
+```
+
+An increasing number of Node.JS packages abandon CommonJS in favour of [ECMAScript module syntax](https://gist.github.com/sindresorhus/a39789f98801d908bbc7ff3ecc99d99c):
+
+```js
+import {x} from 'y'
+```
+
+Enable the `--experimental-esm` [CLI flag](https://testcafe.io/documentation/402639/reference/command-line-interface#--experimental-esm) to import modules that do not support CommonJS. Note: tests with ECMASCript module syntax are subject to [additional requirements](https://testcafe.io/404257/release-notes/framework/2023-1-30-testcafe-v2-3-0-released#additional-reuqirements).
+
+```sh
+testcafe chrome test.js --experimental-esm
+```
+
+#### Additional Reuqirements
+
+To run tests with ECMAScript `import` statements, make sure that your project meets at least one of the following requirements:
+
+1. The value of the `type` key in your project's [package.json file](https://nodejs.org/api/packages.html#packagejson-and-file-extensions) is `module`.
+2. The test files in your project use the `.mjs` extension.
+
+### Bug Fixes
+
+* TestCafe doesn't delete expired cookies ([#7432](https://github.com/DevExpress/testcafe/issues/7432)).
+* TestCafe cannot handle windows that appear when the user clicks a link with a `_blank` target ([#6926](https://github.com/DevExpress/testcafe/issues/6926)).
+* TestCafe fails to start because it triggers the `dns.setDefaultResultOrder` method in older Node.js environments ([#7447](https://github.com/DevExpress/testcafe/issues/7447)).
+* TestCafe depends on a vulnerable, outdated version of the `babel-plugin-module-resolver` package ([#7456](https://github.com/DevExpress/testcafe/issues/7456)).
+
+## v2.2.0 (2022-12-29)
+
+TestCafe v2.2.0 introduces user-defined custom actions and an important *experimental* capability. Google Chrome users can now enable "proxyless mode" to speed up their test suite.
+
+### Custom Action Support
+
+TestCafe users can now define [custom test actions](xref:404150). Place the definition function in a [**JavaScript** configuration file](xref:402638#customactions):
+
+```js
+module.exports = {
+  customActions: {
+   async makeCoffee (args) {
+        await this.click(args);
+    }, 
+  }
+};
+```
+
+Include custom methods in your tests alongside [other TestController methods](xref:402632#test-controller-api). 
+Add the `customActions` prefix when you call the action:
+
+```js
+test('Test with a custom action', async t => {
+    await t.click()
+        .customActions.makeCoffee()
+        .click();
+})
+```
+
+### Experimental: Proxyless mode
+
+TestCafe runs an under-the-hood [reverse proxy](xref:402631#page-proxying) to automate tests across different browsers. But this technique complicates the framework. Native automation protocols offer superior automation speeds and greater stability. That's why the TestCafe team decided to gradually phase the reverse proxy out in favor of native support for these automation protocols.
+
+TestCafe v2.2.0 includes an **experimental** option that disables the proxy for **Google Chrome**. 
+
+```sh
+testcafe chrome tests --experimental-proxyless
+```
+
+You can enable this option in the [command line interface](xref:402639#--experimental-proxyless), the [Test Runner API](xref:402662), and the [configuration file](xref:402638#experimentalproxyless). Read the [Proxyless mode guide](xref:404237) for more information.
+
+### Bug Fixes
+
+* TestCafe doesn't hide the live mode status bar when the bar obstructs the action target ([#7384](https://github.com/DevExpress/testcafe/issues/7384))
+* The 'Target element is overlapped' message does not reference the Selector that caused the warning ([#7386](https://github.com/DevExpress/testcafe/issues/7386))
+* The TestCafe Dashboard reporter includes an outdated `uuid` dependency ([testcafe-reporter-dashboard#111](https://github.com/DevExpress/testcafe-reporter-dashboard/issues/111))
+* TestCafe doesn't display the correct error message when the framework throws an exception ([#6936](https://github.com/DevExpress/testcafe/issues/6936))
+* TestCafe retains some cookies after the user requests their deletion (PR [testcafe-hammerhead#2818](https://github.com/DevExpress/testcafe-hammerhead/pull/2818))
+* TestCafe cannot load test pages with the `localhost` URL on Node.js v17 and up ([#7396](https://github.com/DevExpress/testcafe/issues/7396))
+* TestCafe cannot take screenshots in headless Chrome on Node.js v17 and up ([#7408](https://github.com/DevExpress/testcafe/issues/7408))
+* Web workers that originate from Blob URLs throw an error when they call the  `importScript` function ([#7378](https://github.com/DevExpress/testcafe/issues/7378))
+* TestCafe doesn't set the correct `Request` header when an `iframe` points the user to a new URL ([#7376](https://github.com/DevExpress/testcafe/issues/7376), PR [testcafe-hammerhead#2813](https://github.com/DevExpress/testcafe-hammerhead/pull/2813) by [@naggingant](https://github.com/naggingant))
+* TestCafe cannot interact with options that belong to a `<select>` element with the `multiple` attribute (PR [testcafe-hammerhead#2815](https://github.com/DevExpress/testcafe-hammerhead/pull/2815))
+
+## v2.1.0 (2022-11-10)
+
+### Improvements
+
+#### Improved handling of invisible elements
+
+* [Visibility criteria](xref:402833#visibility-criteria) update: TestCafe no longer interacts with elements that have the `visibility: collapse` attribute.
+* If the action target does not fit the visibility criteria, TestCafe outputs an error message that references the exact reason. ([#7310](https://github.com/DevExpress/testcafe/issues/7310)).
+
+#### Improved handling of overlapped elements
+
+* When another element overlaps the center of the action target, TestCafe scans the target element for available points of contact. If the selector timeout ends before TestCafe finds an unobstructed point, TestCafe outputs a warning message and interacts with the topmost element at the center of the original target ([#7309](https://github.com/DevExpress/testcafe/issues/7309)).
+* TestCafe v2.1.0 contains an improved algorithm that detects whether extra scrolling can resolve an element obstruction issue. ([#6208](https://github.com/DevExpress/testcafe/issues/6208))
+
+### Bug Fixes
+
+* In some environments, TestCafe cannot take screenshots when the test runs in a headless Chromium-based browser ([#7224](https://github.com/DevExpress/testcafe/issues/7224)).
+* Full-page screenshots in headless Chrome do not include the edges of the page ([#5961](https://github.com/DevExpress/testcafe/issues/5961)).
+* TestCafe throws the "TypeError: Illegal invocation" error when the front-end code passes a number value to the  `Element.insertAdjacentText` method ([#7352](https://github.com/DevExpress/testcafe/issues/7352)).
+
+## v2.0.2 (2022-10-31)
+
+### Bug Fixes
+
+* TestCafe doesn't include the flags necessary to launch Chrome in a Podman container ([PR #7307](https://github.com/DevExpress/testcafe/pull/7307) by @timnederhoff)
+* TestCafe doesn't warn users when it interacts with an element that obstructs the original action target ([#2930](https://github.com/DevExpress/testcafe/issues/2930))
+* TestCafe incorrectly parses regular expressions passed to the --skip-js-errors CLI flag ([#7301](https://github.com/DevExpress/testcafe/issues/7301))
+
+## v2.0.1 (2022-09-26)
+
+### Bug Fixes
+
+* TestCafe yields incomplete video recordings in concurrency mode ([#7218](https://github.com/DevExpress/testcafe/issues/7218)).
+* Video recordings in concurrency mode yield `EPIPE` errors that cause crashes ([#7216](https://github.com/DevExpress/testcafe/issues/7216)).
+* Running TestCafe 1.20.1 and up with a high concurrency factor may nonetheless result in a `MaxListenersExceededWarning` warning ([#7188](https://github.com/DevExpress/testcafe/issues/7188)).
+  
+## v2.0.0 (2022-08-31)
+
+### TypeScript update
+
+> :warning:
+> TestCafe 2.0 includes a breaking change.
+The framework’s built-in TypeScript compiler has been updated from version 3.9 to version 4.7. The vast majority of TestCafe users should not experience any issues during the upgrade. However, since TypeScript does not follow the semver versioning policy, even minor TypeScript updates contain breaking changes. Some TypeScript users may need to perform additional actions to ensure the compatibility of their test code.
+
+Read the [TestCafe 2.0 Migration Guide](https://testcafe.io/documentation/404017/recipes/migration/testcafe-2-0-migration-guide) to learn more.
+
+### Improvement: New ways to ignore JavaScript errors
+
+TestCafe v2.0 introduces new ways to ignore JavaScript errors during test runs.
+
+Two new methods allow you to ignore errors on a per-test or a per-fixture basis.
+
+* Use the [test.skipJsErrors](https://testcafe.io/documentation/404026/reference/test-api/test/skipjserrors) method to ignore JavaScript errors in specific tests.
+* Use the [fixture.skipJsErrors](https://testcafe.io/documentation/404025/reference/test-api/fixture/skipjserrors) method to ignore JavaScript errors for specific fixtures.
+* The [t.skipJsErrors](https://testcafe.io/documentation/404027/reference/test-api/testcontroller/skipjserrors) action lets you ignore JavaScript errors at specific points in the test.
+
+For each of the methods above, you can define the following options:
+
+* The pageUrl option filters errors by page URL.
+* The message option filters errors by message.
+* The stack option filters errors by call stack.
+
+Read the [Skip JavaScript Errors](https://testcafe.io/documentation/404038/recipes/debugging/skip-javascript-errors) recipe to learn more.
+
+## v1.20.1 (2022-08-08)
+
+### Bug Fixes
+
+* Running 11 or more tests concurrently causes a memory leak ([#7188](https://github.com/DevExpress/testcafe/issues/7188)).
+* TestCafe cannot switch to iframes that descend from a shadowRoot element ([#3673](https://github.com/DevExpress/testcafe/issues/3673)).
+* TestCafe attempts to execute JSON files without `fixture` and `test` definitions (PR [#7187](https://github.com/DevExpress/testcafe/pull/7187)).
+* TestCafe incorrectly processes request hooks that return status code 500 ([#7213](https://github.com/DevExpress/testcafe/issues/7213))
+
+## v1.20.0 (2022-07-14)
+
+> :warning:
+> Warning: [Impending breaking change](#coming-in-testcafe-20-typescript-4).
+> TestCafe v1.20 is the final version of the framework to support TypeScript 3.
+> The next update will abandon TypeScript 3 in favor of TypeScript 4.
+
+TestCafe v1.20.0 includes two major capabilities: an [API testing toolkit](#api-testing) and the ability to set a [global test page URL](#global-starting-url). Additionally, TestCafe 1.20.0 introduces experimental support for [Chrome User Flow Replays](#experimental-chrome-user-flow-replays), as well as a number of under-the-hood improvements.
+
+### API Testing
+
+TestCafe v1.20.0 includes a comprehensive set of server-side API testing tools. You can add dedicated API tests to your test suite, or include API testing methods in existing functional tests.
+
+The new [Request](https://testcafe.io/documentation/403981/reference/test-api/testcontroller/request) test action executes an HTTP request and returns the server's response.
+
+```js
+const responseBody = await t.request(`http://localhost:3000/helloworld`).body;
+
+t.expect(responseBody).contains('Hello World') // true
+```
+
+Read the [API Testing Guide](https://testcafe.io/documentation/403971/guides/intermediate-guides/api-testing) for a full overview of the framework's API testing capabilities.
+
+### Global starting URL
+
+You can now define a [single starting URL](https://testcafe.io/documentation/402638/reference/configuration-file#baseurl) for all the tests in your test suite.
+
+Declare the `baseUrl` in one of the following three ways:
+
+* The [configuration file property](https://testcafe.io/documentation/402638/reference/configuration-file#baseurl)
+* The [command line option](https://testcafe.io/documentation/402639/reference/command-line-interface#--base-url)
+* The [Test Runner API option](https://testcafe.io/documentation/402655/reference/testcafe-api/runner/run)
+
+Once you define a `baseUrl`, you can omit fixture and test URLs entirely, or define them relative to your `baseUrl`:
+
+```json
+    "baseUrl": "https://devexpress.github.io/testcafe"
+```
+
+```js
+fixture`Test structure`
+    .page`./example`; // starts at https://devexpress.github.io/testcafe/example
+```
+
+### Experimental: Chrome User Flow Replays
+
+TestCafe v1.20.0 introduces **experimental, limited** support for [Google Chrome user flow recordings](https://developer.chrome.com/docs/devtools/recorder/).
+
+Record page actions in Google Chrome and export the recording as a JSON file. TestCafe will play the recording back just like it would a generate a test report
+
+Read the [User Flow Recordings](https://testcafe.io/documentation/403998/guides/experimental-capabilities/chrome-replay-support) guide to learn more.
+
+### Coming in TestCafe 2.0: TypeScript 4
+
+The next version of TestCafe will adopt TypeScript 4 and lose compatibility with TypeScript 3.X.
+
+To [indicate the breaking change](https://semver.org), we will increment the framework's major version number - from 1 to 2.
+
+TestCafe 2.0 will be released later this month.
+
+### Improvements
+
+* Better Google Chrome video capture
+
+    TestCafe v1.20.0 uses the [Screen Capture API](https://developer.mozilla.org/en-US/docs/Web/API/Screen_Capture_API/Using_Screen_Capture) to record videos of Google Chrome test runs. This results in a significantly better test recording framerate and image quality.
+
+    ![Screen capture comparison GIF](https://testcafe.io/images/release-notes/1-20-0-chrome-capture-sample-15fps.gif)
+
+
+### Bug Fixes
+
+* When the `t.typeText` action raises an error, TestCafe mistakenly awaits the target element for the second time ([#6623](https://github.com/DevExpress/testcafe/issues/6623))
+
+* Concurrent test runs do not always generate concurrent test run reports ([#7062](https://github.com/DevExpress/testcafe/issues/7062))
+
+* TestCafe doesn't properly handle errors raised inside the `requestMock` function ([#6703](https://github.com/DevExpress/testcafe/issues/6703))
+
+* The default terminal viewport width is too low for non-tty terminals  (Issue [#5919](https://github.com/DevExpress/testcafe/issues/5919), [PR #6930](https://github.com/DevExpress/testcafe/pull/6930) by @PayBas)
+
+* TestCafe cannot switch to an invisible iframe ([#4558](https://github.com/DevExpress/testcafe/issues/4558))
+
+* Update incorrect TypeScript definitions ([PR #7069](https://github.com/DevExpress/testcafe/pull/7069) by @karolnowinsky)
+
+* Some SVGs don't meet the visibility criteria ([#6998](https://github.com/DevExpress/testcafe/issues/6998))
+
+## v1.19.0 (2022-05-26)
+
+TestCafe v1.19.0 introduces three major capabilities: a [Cookie Management API](#cookie-management), suite-wide [test hooks](#global-test-hooks), and suite-wide [request hooks](#global-request-hooks).
+
+### New Capabilities
+
+#### Cookie Management
+
+Previous versions of TestCafe lacked dedicated cookie management methods. Users had to write custom [client functions](https://testcafe.io/documentation/402832/guides/basic-guides/obtain-client-side-info) to add and remove cookies. This technique was complicated and, at times, limiting. Some cookie manipulation actions --- such as HTTP-only cookie management --- were very hard to integrate into the test suite.
+
+The latest version of the framework includes a proper set of cookie management tools that can handle a wide variety of tasks. Learn more about the new methods in our documentation: [deleteCookies](https://testcafe.io/documentation/403874/reference/test-api/testcontroller/deletecookies), [getCookies](https://testcafe.io/documentation/403873/reference/test-api/testcontroller/getcookies), [setCookies](https://testcafe.io/documentation/403872/reference/test-api/testcontroller/setcookies).
+
+```ts
+fixture('[API] Delete Cookies')
+   .page('https://devexpress.github.io/testcafe/example/');
+
+test('Should delete all the cookies with the specified url', async t => {
+   // Set a cookie for the examples page.
+   await t.setCookies({ name: 'apiCookie1', value: 'value1' });
+
+   // Set a cookie for the 'thank you' page.
+   await t.setCookies({
+       name:  'apiCookie2',
+       value: 'value2',
+   }, 'https://devexpress.github.io/testcafe/example/thank-you.html');
+
+   // Check the cookies.
+   let cookies = await t.getCookies();
+
+   await t
+       .expect(cookies.length).eql(2)
+       .expect(cookies[0]).contains({ name: 'apiCookie1', path: '/testcafe/example/' })
+       .expect(cookies[1]).contains({ name: 'apiCookie2', path: '/testcafe/example/thank-you.html' });
+
+    // Delete cookies from the 'thank you' page.
+    await t.deleteCookies({ domain: 'devexpress.github.io', path: '/testcafe/example/thank-you.html' });
+
+    // Check the cookies.
+    cookies = await t.getCookies();
+
+    await t
+        .expect(cookies.length).eql(1)
+        .expect(cookies[0]).contains({ name: 'apiCookie1', path: '/testcafe/example/' });
+});
+```
+
+#### Global Test Hooks
+
+Many TestCafe users employ test hooks --- functions that run before and after tests and fixtures. In TestCafe v1.19.0 and higher, you can attach hooks to *test runs*, as well as apply test hooks to your *entire suite*. This capability requires the use of a JavaScript configuration file.
+
+Learn more about hooks from our newly updated [hook guide](https://testcafe.io/documentation/403435/guides/advanced-guides/hooks).
+
+#### Global Request Hooks
+
+Request hooks are functions that intercept HTTP requests and mock HTTP responses. Earlier versions of TestCafe let you attach request hooks to one test or fixture at a time. You can now define **global** request hooks and attach them to multiple tests or fixtures in your suite.
+
+Read the [Request Hooks guide](https://testcafe.io/documentation/402842/guides/advanced-guides/intercept-http-requests) to learn more.
+
+ ### Bug Fixes
+
+ * TestCafe ignores CLI browser arguments when they conflict with the configuration file ([#6618](https://github.com/DevExpress/testcafe/issues/6618))
+
+ * The outdated `moment.js` dependency contains a critical vulnerability (PR [#6996](https://github.com/DevExpress/testcafe/pull/6996) by [@vergilfromadyen](https://github.com/vergilfromadyen))
+
+ * TestCafe proxy doesn't always serve cookies with the `secure` attribute ([testcafe-hammerhead/#2715](https://github.com/DevExpress/testcafe-hammerhead/issues/2715))
+
+## v1.18.6 (2022-04-18)
+
+### Bug Fixes
+
+ * Faulty processing of client-side option chains leads to test execution errors ([testcafe-hammerhead/#2714](https://github.com/DevExpress/testcafe-hammerhead/issues/2714))
+
+ * Poor Brotli compression performance ([testcafe-hammerhead/#2743](https://github.com/DevExpress/testcafe-hammerhead/issues/2743))
+
+ * User Roles break when navigating to a new URL in a new window ([PR testcafe-hammerhead/#2754](https://github.com/DevExpress/testcafe-hammerhead/pull/2754))
+
+ * The t.maximizeWindow method doesn't maximise browser windows on macOS ([testcafe-browser-tools/#222](https://github.com/DevExpress/testcafe-browser-tools/issues/222))
+
+## v1.18.5 (2022-03-31)
+
+### Bug Fixes
+
+ * The t.scrollIntoView method causes the "Element is not visible" error when the target's `overflow` property is `hidden` ([#6601](https://github.com/DevExpress/testcafe/issues/6601))
+
+ * TestCafe triggers click events for label elements even when the input is disabled ([#6949](https://github.com/DevExpress/testcafe/issues/6949))
+
+ * TestCafe hangs when you change the active window between two consecutive assertions ([#6037](https://github.com/DevExpress/testcafe/issues/6037))
+
+ * TestCafe cannot take screenshots when using the LambdaTest browser provider ([#6887](https://github.com/DevExpress/testcafe/issues/6887))
+
+ * Pages that target a missing `<iframe>`([testcafe-hammerhead/#2178](https://github.com/DevExpress/testcafe-hammerhead/issues/2178) element with the `Element.focus` method yield a ""TypeError: window.location.toString is not a function" error.
+
+ * TestCafe causes errors when it encounters XMLHTTPRequest calls that fetch resources from `blob:` URLs ([testcafe-hammerhead/#2634](https://github.com/DevExpress/testcafe-hammerhead/issues/2634))
+
+ * `HTMLElement.removeAttributeNode` method calls yield unjustified exceptions ([PR testcafe-hammerhead/#2742](https://github.com/DevExpress/testcafe-hammerhead/pull/2742) by @TrevorKarjanis)
+
+## v1.18.4 (2022-02-21)
+
+### Bug Fixes
+
+ * TestCafe does not display reporter output during initialization ([#6842](https://github.com/DevExpress/testcafe/issues/6842))
+
+ * TestCafe uses outdated automation scripts after cache expiration ([testcafe-hammerhead/#2738](https://github.com/DevExpress/testcafe-hammerhead/issues/2738), [PR](https://github.com/DevExpress/testcafe-hammerhead/issues/2739) by @rr13k)
+
+ * The `Node.append` method causes the `Illegal invocation` error ([PR testcafe-hammerhead/#2730](https://github.com/DevExpress/testcafe-hammerhead/pull/2730) by @danieltroger)
+
+ * Scripts in SVG documents cause the `Illegal invocation` error ([testcafe-hammerhead/#2735](https://github.com/DevExpress/testcafe-hammerhead/issues/2735
+))
+
+## v1.18.3 (2022-01-25)
+
+### Bug Fixes
+
+* The `nanoid` package is vulnerable to CVE-2021-23566 ([#6826](https://github.com/DevExpress/testcafe/pull/6826))
+* The `Selector.visibility` property does not depend on the parent elements' visibility ([#3495](https://github.com/DevExpress/testcafe/issues/3495))
+
+## v1.18.2 (2022-01-18)
+
+### Bug Fixes
+
+* Tests with client scripts yield the "Cannot read property 'tests' of null" error ([#6305](https://github.com/DevExpress/testcafe/issues/6305))
+* TestCafe hangs after failing to initialize a Role ([#5278](https://github.com/DevExpress/testcafe/issues/5278))
+* Testcafe falsely detects filter directives in the configuration file ([#6620](https://github.com/DevExpress/testcafe/issues/6620))
+* Concurrent Chrome instances cannot reconnect to TestCafe after a restart ([#4554](https://github.com/DevExpress/testcafe/issues/4554))
+* TestCafe hangs if a user enters an iframe and then switches to a different browser window ([#6085](https://github.com/DevExpress/testcafe/issues/6085))
+* TestCafe opens incorrect URLs when you concurrently run multiple fixtures from the same test file ([#6041](https://github.com/DevExpress/testcafe/issues/6041))
+* TestCafe expands disabled `<select>` elements ([#5616](https://github.com/DevExpress/testcafe/issues/5616))
+* TestCafe does not load some cross-domain iframes ([#6633](https://github.com/DevExpress/testcafe/issues/6633))
+* TestCafe incorrectly sets the Document.referrer property in Chrome 89 ([#6144](https://github.com/DevExpress/testcafe/issues/6144))
+* Tests hang when the test page initiates a file download ([#5796](https://github.com/DevExpress/testcafe/issues/5796))
+* Requests fail because TestCafe incorrectly handles dynamic content security policy ([#6057](https://github.com/DevExpress/testcafe/issues/6057))
+* TestCafe triggers pointerdown event handlers twice ([#5891](https://github.com/DevExpress/testcafe/issues/5891))
+* TestCafe cannot trigger click event handlers for Angular buttons with the "disabled" attribute ([#5240](https://github.com/DevExpress/testcafe/issues/5240))
+
+## v1.18.1 (2021-12-23)
+
+### macOS Bug Fix
+
+TestCafe fails to launch Safari after the v1.18.0 update.
+
+## v1.18.0 (2021-12-22)
+
+TestCafe v1.18.0 includes a new experimental Selector debugging capability, important improvements for macOS users and a number of routine bug fixes.
+
+If you run TestCafe on macOS, follow the [Upgrade Guide](https://testcafe.io/403664/release-notes/framework/2021-12-22-testcafe-v1-18-0-released#upgrade-instructions) to make sure your upgrade goes smoothly.
+
+### New Debugging Capabilities (Experimental)
+
+If you launch TestCafe with the `--experimental-debug` flag, you can debug Selectors and Client Functions in the Watch panel of a Node.js debugger.
+
+### macOS improvements
+
+#### TestCafe Browser Tools on Apple Silicon
+
+The TestCafe Browser Tools package is a communication layer that automates browsers on behalf of TestCafe. Both the TestCafe framework and TestCafe Studio include the TestCafe Browser Tools binary.
+
+Earlier versions of TestCafe Browser Tools were optimized for the x86-64 architecture. [Apple Silicon Macs](https://support.apple.com/en-gb/HT211814/) ran those binaries through the [Rosetta 2 translation layer](https://developer.apple.com/documentation/apple-silicon/about-the-rosetta-translation-environment/). Rosetta 2 took up additional space and prevented TestCafe from taking full advantage of the processor.
+
+TestCafe v1.18.0 includes a **Universal** TestCafe Browser Tools binary that runs natively on both x64 Macs **and** Apple Silicon Macs.
+
+Follow the [Upgrade Instructions](https://testcafe.io/403664/release-notes/framework/2021-12-22-testcafe-v1-18-0-released#upgrade-instructions) to make sure your version of TestCafe Browser Tools is up to date.
+
+#### TestCafe Browser Tools macOS Permission Fix
+
+The TestCafe Browser Tools binary requires special privileges to automate browsers and take screenshots. Security improvements in recent versions of macOS made these privileges harder to obtain.
+
+Prior to TestCafe v1.18.0, each installation of TestCafe and TestCafe Studio included a TestCafe Browser Tools binary. macOS users with multiple sets of TestCafe Browser Tools had to go through a lengthy process to obtain the necessary permissions.
+
+TestCafe v1.18.0 and TestCafe Studio v1.7 address this issue. Beginning with this version, all TestCafe installations share a single TestCafe Browser Tools binary. TestCafe stores this binary in the user's Home directory, inside the hidden `~/.testcafe-browser-tools` folder.
+
+Follow the [Upgrade Instructions](https://testcafe.io/403664/release-notes/framework/2021-12-22-testcafe-v1-18-0-released#upgrade-instructions) to reset TestCafe Browser Tools' permissions and enable the new binary.
+
+### Bug Fixes
+
+* TestCafe immediately closes new windows ([#6680](https://github.com/DevExpress/testcafe/issues/6680))
+* Tests fail with the `TypeError: Invalid value used as weak map key.` error ([#6563](https://github.com/DevExpress/testcafe/issues/6563))
+* The latest version of the TestCafe Docker image cannot connect to Chrome and Chromium ([#6436](https://github.com/DevExpress/testcafe/issues/6436))
+* TestCafe loses test error call stack and outputs the following message instead: `"Uncaught object "[object Object]"` (Issue [#6624](https://github.com/DevExpress/testcafe/issues/6624). Discovered by [@danieltroger](https://github.com/DevExpress/testcafe/issues/6624#issuecomment-975918371), PR by [@rob4629](https://github.com/DevExpress/testcafe/pull/6719).)
+* Lack of definitions for two new timeout options results in TypeScript compilation errors ([#6713](https://github.com/DevExpress/testcafe/issues/6713))
+* TypeScript filter functions erroneously require a Promise return value ([#6705](https://github.com/DevExpress/testcafe/issues/6705))
+
+## v1.17.1 (2021-11-11)
+
+### Bug Fixes
+
+- TestCafe incorrectly reads the 'reporter' configuration file option ([#6665](https://github.com/DevExpress/testcafe/issues/6665), [#6594](https://github.com/DevExpress/testcafe/issues/6594)).
+- An error report displays multiple warnings when you debug a test in headless mode ([#6605](https://github.com/DevExpress/testcafe/issues/6605)).
+- The testcafe-hammerhead proxy fails to load a web page ([testcafe-hammerhead/#2708](https://github.com/DevExpress/testcafe-hammerhead/issues/2708)).
+
+## v1.17.0 (2021-11-02)
+
+### Enhancements
+
+#### Global Test and Fixture Hooks
+
+You can now specify [global test and fixture hooks](https://testcafe.io/documentation/403435/guides/advanced-guides/hooks#global-hooks). TestCafe attaches these hooks to every test / fixture in the test suite.
+
+```js
+module.exports = {
+    hooks: {
+        fixture: {
+            before: async (ctx) => {
+                // your code
+            },
+            after: async (ctx) => {
+                // your code
+            }
+        },
+        test: {
+            before: async (t) => {
+                // your code
+            },
+            after: async (t) => {
+                // your code
+            }
+        }
+    }
+};
+```
+
+#### Execution Timeouts
+
+You can now specify custom timeouts for tests and test runs. If a test/test run is idle or unresponsive for the specified length of time, TestCafe terminates it. Specify these timeouts in the [configuration file](https://testcafe.io/documentation/402638/reference/configuration-file) or from the [command line](https://testcafe.io/documentation/402639/reference/command-line-interface).
+
+**Command line interface**
+
+```sh
+testcafe chrome my-tests --test-execution-timeout 180000
+testcafe chrome my-tests --run-execution-timeout 180000
+```
+**Configuration file**
+
+```json
+{
+    "runExecutionTimeout": 180000,
+    "testExecutionTimeout": 180000
+}
+```
+
+### Bug Fixes
+
+- TestCafe fails to continue the test after the user downloads a file. ([#6242](https://github.com/DevExpress/testcafe/issues/6242)).
+- The TestCafe proxy does not fire the "unpipe" event when necessary. This omission leads to the "This socket has been ended by the other party" error ([#6558](https://github.com/DevExpress/testcafe/issues/6558)).
+- TestCafe incorrectly handles rewritten uninitialized iframes ([testcafe-hammerhead/#2694](https://github.com/DevExpress/testcafe-hammerhead/issues/2694), [testcafe-hammerhead/#2693](https://github.com/DevExpress/testcafe-hammerhead/issues/2693)).
+
 ## v1.16.1 (2021-10-05)
 
 ### Bug Fixes
@@ -96,17 +1214,17 @@ test('Type text', async t => {
 
 ### Bug Fixes
 
-* The `Element.getAttribute` method returns an incorrect value ([#5984](https://github.com/DevExpress/testcafe/issues/5984)). 
+* The `Element.getAttribute` method returns an incorrect value ([#5984](https://github.com/DevExpress/testcafe/issues/5984)).
 * TestCafe test fails when you forget to include the `await` keyword before the assertion statement ([#4613](https://github.com/DevExpress/testcafe/issues/4613)).
 * TestCafe fails to focus an element inside a shadow DOM ([#4988](https://github.com/DevExpress/testcafe/issues/4988)).
 * TestCafe fails to focus SVG elements ([#6262](https://github.com/DevExpress/testcafe/issues/6262)).
 * TestCafe raises the blur event when you focus a non-focusable element ([#6236](https://github.com/DevExpress/testcafe/pull/6236)).
 * TestCafe test hangs when you click a link within a cross-domain iframe ([#6331](https://github.com/DevExpress/testcafe/pull/6331)).
-* TestCafe loads the Babel compiler libraries multiple times ([#6310](https://github.com/DevExpress/testcafe/pull/6310)). 
-* TestCafe incorrectly parses the meta refresh tags ([#2663](https://github.com/DevExpress/testcafe-hammerhead/pull/2663))
-* TestCafe incorrectly processes iframe elements with the "srcdoc" attribute ([#2647](https://github.com/DevExpress/testcafe-hammerhead/issues/2647)).
-* TestCafe incorrectly specifies the Referer HTTP request header if you use the "navigateTo" action ([#2607](https://github.com/DevExpress/testcafe-hammerhead/issues/2607)).
-* An error related to the [bug in Node.js](https://github.com/nodejs/node/issues/37849) occurs ([#2655](https://github.com/DevExpress/testcafe-hammerhead/pull/2655)). 
+* TestCafe loads the Babel compiler libraries multiple times ([#6310](https://github.com/DevExpress/testcafe/pull/6310)).
+* TestCafe incorrectly parses the meta refresh tags ([PR testcafe-hammerhead/#2663](https://github.com/DevExpress/testcafe-hammerhead/pull/2663))
+* TestCafe incorrectly processes iframe elements with the "srcdoc" attribute ([testcafe-hammerhead/#2647](https://github.com/DevExpress/testcafe-hammerhead/issues/2647)).
+* TestCafe incorrectly specifies the Referer HTTP request header if you use the "navigateTo" action ([testcafe-hammerhead/#2607](https://github.com/DevExpress/testcafe-hammerhead/issues/2607)).
+* An error related to the [bug in Node.js](https://github.com/nodejs/node/issues/37849) occurs ([testcafe-hammerhead/#2655](https://github.com/DevExpress/testcafe-hammerhead/pull/2655)).
 
 ## v1.15.0 (2021-07-08)
 
@@ -179,7 +1297,7 @@ TestCafe now has the capability to proxy non-HTML documents such as XML and text
 * Added a type definition for the `disableScreenshots` Runner option ([#5735](https://github.com/DevExpress/testcafe/issues/5735))
 * Fixed a multi-window mode bug that caused TestCafe to launch an empty browser window and then hang ([#6132](https://github.com/DevExpress/testcafe/issues/6132))
 * Fixed a bug that denied users access to iframes with `srcdoc` attributes ([#6033](https://github.com/DevExpress/testcafe/issues/6033))
-* Fixed a bug that interfered with the loading of Word Online documents in Firefox ([testcafe-hammerhead#2287](https://github.com/DevExpress/testcafe-hammerhead/issues/2287))
+* Fixed a bug that interfered with the loading of Word Online documents in Firefox ([testcafe-hammerhead/#2287](https://github.com/DevExpress/testcafe-hammerhead/issues/2287))
 
 ## v1.14.0 (2021-4-7)
 

@@ -3,7 +3,8 @@ import { RUNTIME_ERRORS } from './errors/types';
 import CONTENT_TYPES from './assets/content-types';
 import OPTION_NAMES from './configuration/option-names';
 import * as INJECTABLES from './assets/injectables';
-import setupSourceMapSupport from './utils/setup-sourcemap-support';
+import { setupSourceMapSupport } from './utils/setup-sourcemap-support';
+import BrowserConnectionGatewayStatus from './browser/connection/gateway/status';
 
 const lazyRequire              = require('import-lazy')(require);
 const hammerhead               = lazyRequire('testcafe-hammerhead');
@@ -12,7 +13,6 @@ const errorHandlers            = lazyRequire('./utils/handle-errors');
 const BrowserConnectionGateway = lazyRequire('./browser/connection/gateway');
 const BrowserConnection        = lazyRequire('./browser/connection');
 const browserProviderPool      = lazyRequire('./browser/provider/pool');
-const CompilerHost             = lazyRequire('./services/compiler/host');
 const Runner                   = lazyRequire('./runner');
 const LiveModeRunner           = lazyRequire('./live/test-runner');
 
@@ -24,22 +24,18 @@ export default class TestCafe {
         setupSourceMapSupport();
         errorHandlers.registerErrorHandlers();
 
-        const { hostname, port1, port2, options } = configuration.startOptions;
+        this.closed        = false;
+        this.proxy         = new hammerhead.Proxy();
+        this.runners       = [];
+        this.configuration = configuration;
 
-        this.closed                   = false;
-        this.proxy                    = new hammerhead.Proxy(hostname, port1, port2, options);
-        this.browserConnectionGateway = new BrowserConnectionGateway(this.proxy, { retryTestPages: configuration.getOption(OPTION_NAMES.retryTestPages) });
-        this.runners                  = [];
-        this.configuration            = configuration;
+        this.browserConnectionGateway = new BrowserConnectionGateway(this.proxy, this.configuration.browserConnectionGatewayOptions);
 
-        if (configuration.getOption(OPTION_NAMES.experimentalDebug)) {
-            const developmentMode = configuration.getOption(OPTION_NAMES.developmentMode);
-            const v8Flags         = configuration.getOption(OPTION_NAMES.v8Flags);
+        const developmentMode = configuration.getOption(OPTION_NAMES.developmentMode);
 
-            this.compilerService = new CompilerHost({ developmentMode, v8Flags });
-        }
-
-        this._registerAssets(options.developmentMode);
+        this.browserConnectionGateway.on('initialized', () => {
+            this._registerAssets(developmentMode);
+        });
     }
 
     _registerAssets (developmentMode) {
@@ -58,7 +54,7 @@ export default class TestCafe {
         this.proxy.GET(INJECTABLES.TESTCAFE_UI, { content: uiScript, contentType: CONTENT_TYPES.javascript });
         this.proxy.GET(INJECTABLES.TESTCAFE_UI_SPRITE, { content: uiSprite, contentType: CONTENT_TYPES.png });
         this.proxy.GET(INJECTABLES.TESTCAFE_UI_SPRITE_SVG, { content: uiSpriteSvg, contentType: CONTENT_TYPES.svg });
-        this.proxy.GET(INJECTABLES.TESTCAFE_ICON, { content: favIcon, contentType: CONTENT_TYPES.icon });
+        this.proxy.GET(INJECTABLES.DEFAULT_FAVICON_PATH, { content: favIcon, contentType: CONTENT_TYPES.icon });
 
         this.proxy.GET(INJECTABLES.TESTCAFE_UI_STYLES, {
             content:              uiStyle,
@@ -72,8 +68,7 @@ export default class TestCafe {
         const newRunner = new Ctor({
             proxy:                    this.proxy,
             browserConnectionGateway: this.browserConnectionGateway,
-            configuration:            this.configuration.clone(),
-            compilerService:          this.compilerService,
+            configuration:            this.configuration.clone(OPTION_NAMES.hooks),
         });
 
         this.runners.push(newRunner);
@@ -81,11 +76,27 @@ export default class TestCafe {
         return newRunner;
     }
 
+    async initializeBrowserConnectionGateway () {
+        await this.configuration.ensureHostname();
+
+        if (this.browserConnectionGateway.status === BrowserConnectionGatewayStatus.uninitialized)
+            this.browserConnectionGateway.initialize(this.configuration.startOptions);
+    }
+
     // API
     async createBrowserConnection () {
         const browserInfo = await browserProviderPool.getBrowserInfo('remote');
 
-        return new BrowserConnection(this.browserConnectionGateway, browserInfo, true);
+        // NOTE: 'remote' browser connection cannot be in the 'native automation' mode.
+        this.configuration.mergeOptions({ disableNativeAutomation: true });
+
+        await this.initializeBrowserConnectionGateway();
+
+        const connection = new BrowserConnection(this.browserConnectionGateway, browserInfo, true, this.configuration.remoteBrowserConnectionOptions);
+
+        connection.initialize();
+
+        return connection;
     }
 
     createRunner () {
@@ -108,11 +119,6 @@ export default class TestCafe {
         await Promise.all(this.runners.map(runner => runner.stop()));
 
         await browserProviderPool.dispose();
-
-        if (this.compilerService)
-            this.compilerService.stop();
-
         await this.browserConnectionGateway.close();
-        this.proxy.close();
     }
 }

@@ -14,23 +14,41 @@ import RequestHook from '../request-hooks/hook';
 import ClientScriptInit from '../../custom-client-scripts/client-script-init';
 import { SPECIAL_BLANK_PAGE } from 'testcafe-hammerhead';
 
+interface FixtureInitOptions {
+    baseUrl?: string;
+    testFile: TestFile;
+}
+
 export default class Fixture extends TestingUnit {
     public path: string;
+    public disableConcurrency: boolean;
     public beforeEachFn: Function | null;
     public afterEachFn: Function | null;
     public beforeFn: Function | null;
     public afterFn: Function | null;
+    public globalBeforeFn: Function | null;
+    public globalAfterFn: Function | null;
 
-    public constructor (testFile: TestFile) {
-        super(testFile, UnitType.fixture, SPECIAL_BLANK_PAGE);
+    public constructor (testFile: TestFile, baseUrl?: string, returnApiOrigin = true) {
+        const pageUrl = baseUrl || SPECIAL_BLANK_PAGE;
 
-        this.path         = testFile.filename;
-        this.beforeEachFn = null;
-        this.afterEachFn  = null;
-        this.beforeFn     = null;
-        this.afterFn      = null;
+        super(testFile, UnitType.fixture, pageUrl, baseUrl);
 
-        return this.apiOrigin as unknown as Fixture;
+        this.path               = testFile.filename;
+        this.beforeEachFn       = null;
+        this.afterEachFn        = null;
+        this.beforeFn           = null;
+        this.afterFn            = null;
+        this.globalBeforeFn     = null;
+        this.globalAfterFn      = null;
+        this.disableConcurrency = false;
+
+        if (returnApiOrigin)
+            return this.apiOrigin as unknown as Fixture;
+    }
+
+    public static init ({ testFile, baseUrl }: FixtureInitOptions): Fixture {
+        return super.init(Fixture, testFile, baseUrl) as unknown as Fixture;
     }
 
     protected _add (name: string, ...rest: unknown[]): Function {
@@ -40,6 +58,12 @@ export default class Fixture extends TestingUnit {
 
         this.name                    = name;
         this.testFile.currentFixture = this;
+
+        return this.apiOrigin;
+    }
+
+    private _disableConcurrency$getter (): Function {
+        this.disableConcurrency = true;
 
         return this.apiOrigin;
     }

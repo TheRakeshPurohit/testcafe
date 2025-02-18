@@ -1,5 +1,5 @@
 import { ActionCommandBase, CommandBase } from './base';
-import { ExecuteClientFunctionCommand, ExecuteSelectorCommand } from './observation';
+import { ExecuteClientFunctionCommand, ExecuteSelectorCommand } from './execute-client-function';
 
 import {
     ActionOptions,
@@ -8,10 +8,14 @@ import {
     MouseOptions,
     PressOptions,
     TypeOptions,
+    CookieOptions,
+    GetProxyUrlOptions,
 } from './options';
 
 import Role from '../../role/role';
 import TestRun from '../index';
+import { SkipJsErrorsOptionsObject } from '../../configuration/interfaces';
+import RequestHook from '../../api/request-hooks/hook';
 
 
 export class SetNativeDialogHandlerCommand extends ActionCommandBase {
@@ -60,6 +64,10 @@ export class GetCurrentWindowCommand extends ActionCommandBase {
 }
 
 export class GetCurrentWindowsCommand extends ActionCommandBase {
+    public constructor(obj: object, testRun: TestRun, validateProperties?: boolean);
+}
+
+export class GetCurrentCDPSessionCommand extends ActionCommandBase {
     public constructor(obj: object, testRun: TestRun, validateProperties?: boolean);
 }
 
@@ -228,3 +236,61 @@ export class ScrollIntoViewCommand extends ActionCommandBase {
     public selector: ExecuteClientFunctionCommand;
     public options: ActionOptions;
 }
+
+export class GetCookiesCommand extends ActionCommandBase {
+    public constructor(obj: object, testRun: TestRun, validateProperties: boolean);
+    public urls: string[];
+    public cookies: CookieOptions[];
+}
+
+export class SetCookiesCommand extends ActionCommandBase {
+    public constructor(obj: object, testRun: TestRun, validateProperties: boolean);
+    public url: string;
+    public cookies: CookieOptions[];
+}
+
+export class DeleteCookiesCommand extends ActionCommandBase {
+    public constructor(obj: object, testRun: TestRun, validateProperties: boolean);
+    public urls: string[];
+    public cookies: CookieOptions[];
+}
+
+export class RequestCommand extends ActionCommandBase {
+    public constructor(obj: object, testRun: TestRun, validateProperties: boolean);
+    public url: string | URL;
+    public options: RequestOptions;
+}
+
+export class GetProxyUrlCommand extends ActionCommandBase {
+    public constructor(obj: object, testRun: TestRun, validateProperties: boolean);
+    public url: string;
+    public options: GetProxyUrlOptions;
+}
+
+export class SkipJsErrorsCommand extends ActionCommandBase {
+    public constructor (obj: object, testRun: TestRun, validateProperties: boolean);
+    public options: SkipJsErrorsOptionsObject | SkipJsErrorsCallbackWithOptionsObject | boolean;
+}
+
+export class AddRequestHooksCommand extends ActionCommandBase {
+    public constructor (obj: object, testRun: TestRun, validateProperties: boolean);
+    public hooks: RequestHook[];
+}
+
+export class RemoveRequestHooksCommand extends ActionCommandBase {
+    public constructor (obj: object, testRun: TestRun, validateProperties: boolean);
+    public hooks: RequestHook[];
+}
+
+export class RunCustomActionCommand extends ActionCommandBase {
+    public constructor (obj: object, testRun: TestRun, validateProperties: boolean);
+    public fn: Function;
+    public name: string;
+    public args: any;
+}
+
+export class ReportCommand extends ActionCommandBase {
+    public constructor (obj: object, testRun: TestRun, validateProperties: boolean);
+    public args: any[];
+}
+

@@ -2,17 +2,23 @@ import { EventEmitter } from 'events';
 import RolePhase from './phase';
 import { StateSnapshot } from 'testcafe-hammerhead';
 import roleMarker from './marker-symbol';
-import nanoid from 'nanoid';
+import { nanoid } from 'nanoid';
 import TestRun from '../test-run';
+import TestCafeErrorList from '../errors/error-list';
+import { getUrl, assertRoleUrl } from '../api/test-page-url';
+
+export interface RedirectUrl {
+    [testId: string]: string;
+}
 
 export default class Role extends EventEmitter {
     public id: string;
     public phase: RolePhase;
     public loginUrl: string | null;
-    public redirectUrl: string | null;
+    public redirectUrl: RedirectUrl | string | null;
     public _initFn: Function | null;
     public opts: RoleOptions;
-    public initErr: null | Error;
+    public initErr: null | Error | TestCafeErrorList;
     public stateSnapshot: StateSnapshot;
     private [roleMarker]: boolean;
 
@@ -35,28 +41,17 @@ export default class Role extends EventEmitter {
             return;
 
         this.stateSnapshot = await testRun.getStateSnapshot();
-
-        await testRun?.compilerService?.updateRoleProperty({
-            roleId: this.id,
-            name:   'stateSnapshot',
-            value:  this.stateSnapshot,
-        });
     }
 
-    private _wrapTestFn (testRun: TestRun): void {
-        this._initFn = () => {
-            return testRun.compilerService?.executeRoleInitFn({
-                testRunId: testRun.id,
-                roleId:    this.id,
-            });
-        };
+    private async _setInitError (err: Error): Promise<void> {
+        this.initErr = err;
     }
 
     private async _executeInitFn (testRun: TestRun): Promise<void> {
-        try {
-            if (testRun.compilerService)
-                this._wrapTestFn(testRun);
+        if (this.initErr)
+            return;
 
+        try {
             let fn = (): Promise<void> => (this._initFn as Function)(testRun);
 
             fn = testRun.decoratePreventEmitActionEvents(fn, { prevent: false });
@@ -64,22 +59,34 @@ export default class Role extends EventEmitter {
 
             await fn();
         }
-        catch (err) {
-            this.initErr = err;
+        catch (err: any) {
+            await this._setInitError(err);
+        }
+    }
 
-            await testRun?.compilerService?.updateRoleProperty({
-                roleId: this.id,
-                name:   'initErr',
-                value:  this.initErr,
-            });
+    private _prepareLoginUrl (loginUrl: string, baseUrl: string): string {
+        if (!baseUrl)
+            assertRoleUrl(loginUrl, 'role');
+
+        return getUrl(loginUrl, baseUrl ? new URL(baseUrl) : void 0);
+    }
+
+    private async _switchToCleanRun (testRun: TestRun): Promise<void> {
+        try {
+            if (this.loginUrl)
+                this.loginUrl = this._prepareLoginUrl(this.loginUrl, testRun.baseUrl);
+
+            await testRun.switchToCleanRun(this.loginUrl as string);
+        }
+        catch (err: any) {
+            await this._setInitError(err);
         }
     }
 
     public async initialize (testRun: TestRun): Promise<void> {
         this.phase = RolePhase.pendingInitialization;
 
-        await testRun.switchToCleanRun(this.loginUrl as string);
-
+        await this._switchToCleanRun(testRun);
         await this._executeInitFn(testRun);
         await this._storeStateSnapshot(testRun);
 
@@ -88,23 +95,18 @@ export default class Role extends EventEmitter {
 
         this.phase = RolePhase.initialized;
 
-        await testRun.compilerService?.updateRoleProperty({
-            roleId: this.id,
-            name:   'phase',
-            value:  this.phase,
-        });
-
         this.emit('initialized');
     }
 
     public async setCurrentUrlAsRedirectUrl (testRun: TestRun): Promise<void> {
-        this.redirectUrl = await testRun.getCurrentUrl();
+        const currentUrl = await testRun.getCurrentUrl();
 
-        await testRun.compilerService?.updateRoleProperty({
-            roleId: this.id,
-            name:   'redirectUrl',
-            value:  this.redirectUrl,
-        });
+        if (this.opts.preserveUrl)
+            this.redirectUrl = currentUrl;
+        else {
+            this.redirectUrl = this.redirectUrl || {};
+            (this.redirectUrl as RedirectUrl)[testRun.test.id] = currentUrl;
+        }
     }
 
     public static from (init: unknown): Role | null {

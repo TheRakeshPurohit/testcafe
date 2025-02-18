@@ -3,18 +3,17 @@ import APIBasedTestFileCompilerBase from '../../api-based';
 import isFlowCode from './is-flow-code';
 import BASE_BABEL_OPTIONS from '../../../babel/get-base-babel-options';
 import DISABLE_V8_OPTIMIZATION_NOTE from '../../disable-v8-optimization-note';
+import Extensions from '../extensions';
 
+//NOTE: The semicolon ; prevents the declaration from being bound with eval
 const DISABLE_V8_OPTIMIZATION_CODE =
-`/*${DISABLE_V8_OPTIMIZATION_NOTE}*/
+`;/*${DISABLE_V8_OPTIMIZATION_NOTE}*/
 eval("");
 `;
 
 export default class ESNextTestFileCompiler extends APIBasedTestFileCompilerBase {
-    constructor (isCompilerServiceMode) {
-        super(isCompilerServiceMode);
-    }
 
-    static getBabelOptions (filename, code, isCompilerServiceMode) {
+    static getBabelOptions (filename, code, { esm } = {}) {
         const {
             presetStage2,
             presetFlow,
@@ -22,13 +21,14 @@ export default class ESNextTestFileCompiler extends APIBasedTestFileCompilerBase
             presetEnvForTestCode,
             presetReact,
             moduleResolver,
-            proposalPrivateMethods,
-            proposalClassProperties,
-        } = loadBabelLibs(isCompilerServiceMode);
+            transformPrivateMethods,
+            transformClassProperties,
+            transformClassStaticBlock,
+        } = loadBabelLibs({ esm });
 
         const opts = Object.assign({}, BASE_BABEL_OPTIONS, {
             presets:    [presetStage2, presetEnvForTestCode, presetReact],
-            plugins:    [transformRuntime, moduleResolver, proposalPrivateMethods, proposalClassProperties],
+            plugins:    [transformRuntime, moduleResolver, transformPrivateMethods, transformClassProperties, transformClassStaticBlock],
             sourceMaps: 'inline',
             filename,
         });
@@ -40,15 +40,15 @@ export default class ESNextTestFileCompiler extends APIBasedTestFileCompilerBase
     }
 
     _compileCode (code, filename) {
-        const { babel } = loadBabelLibs();
+        const { babel } = loadBabelLibs(this);
 
         if (this.cache[filename])
             return this.cache[filename];
 
-        if (this.isCompilerServiceMode)
+        if (this.esm)
             code += DISABLE_V8_OPTIMIZATION_CODE;
 
-        const opts     = ESNextTestFileCompiler.getBabelOptions(filename, code, this.isCompilerServiceMode);
+        const opts     = ESNextTestFileCompiler.getBabelOptions(filename, code, this);
         const compiled = babel.transform(code, opts);
 
         this.cache[filename] = compiled.code;
@@ -57,13 +57,25 @@ export default class ESNextTestFileCompiler extends APIBasedTestFileCompilerBase
     }
 
     _getRequireCompilers () {
-        return {
-            '.js':  (code, filename) => this._compileCode(code, filename),
-            '.jsx': (code, filename) => this._compileCode(code, filename),
+        const requireCompilers = {
+            [Extensions.js]:  (code, filename) => this._compileCode(code, filename),
+            [Extensions.jsx]: (code, filename) => this._compileCode(code, filename),
+            [Extensions.cjs]: (code, filename) => this._compileCode(code, filename),
         };
+
+        if (this.esm)
+            requireCompilers[Extensions.mjs] = (code, filename) => this._compileCode(code, filename);
+
+        return requireCompilers;
+    }
+
+    get canCompileInEsm () {
+        return true;
     }
 
     getSupportedExtension () {
-        return ['.js', '.jsx'];
+        const supportedExtensions = [Extensions.js, Extensions.jsx, Extensions.cjs, Extensions.mjs];
+
+        return supportedExtensions;
     }
 }

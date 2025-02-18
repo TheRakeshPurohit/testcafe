@@ -47,7 +47,7 @@ export function wordWrap (str, indent, width) {
 
 export function splitQuotedText (str, splitChar, quotes = '"\'') {
     let currentPart = '';
-    const parts       = [];
+    const parts     = [];
     let quoteChar   = null;
 
     for (let i = 0; i < str.length; i++) {
@@ -90,7 +90,7 @@ function getDisplayedItemText (item, quote) {
 export function getConcatenatedValuesString (array, separator = DEFAULT_CONCATENATED_VALUES.SEPARATOR, quoteChar = DEFAULT_CONCATENATED_VALUES.QUOTE_CHAR) {
     const clonedArray = [...array];
 
-    if (separator === '\n')
+    if (separator.indexOf('\n') > -1)
         return clonedArray.map(item => getDisplayedItemText(item, quoteChar)).join(separator);
 
     else if (clonedArray.length === 1)

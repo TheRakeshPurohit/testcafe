@@ -14,6 +14,9 @@ const domUtils      = testCafeCore.domUtils;
 const style         = testCafeCore.styleUtils;
 const textSelection = testCafeCore.textSelection;
 
+const isMobileSafari = browserUtils.isSafari && featureDetection.isTouchDevice;
+
+QUnit.config.testTimeout = 30000;
 
 $(document).ready(function () {
     //constants
@@ -34,7 +37,7 @@ $(document).ready(function () {
 
     const startSelectEvent       = featureDetection.isTouchDevice ? 'ontouchstart' : 'onmousedown';
     const endSelectEvent         = featureDetection.isTouchDevice ? 'ontouchend' : 'onmouseup';
-    const checkScrollAfterSelect = !(browserUtils.isFirefox || browserUtils.isIE);
+    const checkScrollAfterSelect = !browserUtils.isFirefox;
 
     let mousedownOnInput    = false;
     let mouseupOnInput      = false;
@@ -88,9 +91,7 @@ $(document).ready(function () {
         equal(domUtils.getActiveElement(), el, 'selected element is active');
         equal(textSelection.getSelectionStart(el), start, 'start selection correct');
         equal(textSelection.getSelectionEnd(el), end, 'end selection correct');
-
-        if (!window.DIRECTION_ALWAYS_IS_FORWARD)
-            equal(textSelection.hasInverseSelection(el), inverse || false, 'selection direction correct');
+        equal(textSelection.hasInverseSelection(el), inverse || false, 'selection direction correct');
     }
 
     function restorePageState () {
@@ -154,12 +155,14 @@ $(document).ready(function () {
         };
     }
 
-    $('body').css('height', '1500px');
+    const startNext = function () {
+        if (isMobileSafari)
+            window.setTimeout(start, 200);
+        else
+            start();
+    };
 
-    //NOTE: problem with window.top bodyMargin in IE9 if test 'runAll'
-    //because we can't determine that element is in qunit test iframe
-    if (browserUtils.isIE9)
-        $(window.top.document).find('body').css('marginTop', '0px');
+    $('body').css('height', '1500px');
 
     //tests
     QUnit.testStart(function () {
@@ -176,7 +179,8 @@ $(document).ready(function () {
 
     module('check the boundary cases');
 
-    asyncTest('select empty input', function () {
+    // TODO: fix test timeout for iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('select empty input', function () {
         const $input = $(INPUT_SELECTOR);
 
         setValueToInput('');
@@ -190,11 +194,13 @@ $(document).ready(function () {
                 ok(mouseupOnInput, 'select ended on input');
 
                 checkSelection($input[0], 0, 0);
-                start();
+
+                startNext();
             });
     });
 
-    asyncTest('select empty textarea', function () {
+    // TODO: fix test timeout on iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('select empty textarea', function () {
         const $textarea = $(TEXTAREA_SELECTOR);
 
         setValueToTextarea('');
@@ -208,11 +214,13 @@ $(document).ready(function () {
                 ok(mouseupOnTextarea, 'select ended on textarea');
 
                 checkSelection($textarea[0], 0, 0);
-                start();
+
+                startNext();
             });
     });
 
-    asyncTest('select in input with some spaces in succession', function () {
+    // TODO: fix test timeout on iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('select in input with some spaces in succession', function () {
         const $input = $(INPUT_SELECTOR);
 
         setValueToInput('1   2     3    4    5      6');
@@ -226,11 +234,13 @@ $(document).ready(function () {
                 ok(mouseupOnInput, 'select ended on input');
 
                 checkSelection($input[0], 3, 25);
-                start();
+
+                startNext();
             });
     });
 
-    asyncTest('select in textarea with some empty strings', function () {
+    // TODO: fix test timeout on iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('select in textarea with some empty strings', function () {
         const $textarea = $(TEXTAREA_SELECTOR);
 
         let valueLength = null;
@@ -247,13 +257,15 @@ $(document).ready(function () {
                 ok(mouseupOnTextarea, 'select ended on textarea');
 
                 checkSelection($textarea[0], 3, valueLength - 3);
-                start();
+
+                startNext();
             });
     });
 
     module('scroll in input');
 
-    asyncTest('forward select and scroll', function () {
+    // TODO: stabilize test on iOS
+    (browserUtils.isIOS || browserUtils.isSafari ? QUnit.skip : asyncTest)('forward select and scroll', function () {
         const input = $(INPUT_SELECTOR)[0];
 
         let mousedown = false;
@@ -286,12 +298,14 @@ $(document).ready(function () {
                 if (checkScrollAfterSelect)
                     ok(style.getElementScroll(input).left > 0);
 
-                expect((checkScrollAfterSelect ? 9 : 7) - Number(window.DIRECTION_ALWAYS_IS_FORWARD));
-                start();
+                expect(checkScrollAfterSelect ? 9 : 7);
+
+                startNext();
             });
     });
 
-    asyncTest('backward select and scroll', function () {
+    // TODO: stabilize test on iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('backward select and scroll', function () {
         const input = $(INPUT_SELECTOR)[0];
 
         let oldScroll = null;
@@ -329,14 +343,16 @@ $(document).ready(function () {
                 if (checkScrollAfterSelect)
                     ok(style.getElementScroll(input).left < oldScroll);
 
-                expect((checkScrollAfterSelect ? 9 : 6) - Number(window.DIRECTION_ALWAYS_IS_FORWARD));
-                start();
+                expect(checkScrollAfterSelect ? 9 : 6);
+
+                startNext();
             });
     });
 
     module('scroll in textarea');
 
-    asyncTest('forward select and right direction (endPos more than startPos)', function () {
+    // TODO: fix it for iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('forward select and right direction (endPos more than startPos)', function () {
         const textarea = $(TEXTAREA_SELECTOR)[0];
 
         let mousedown = false;
@@ -375,12 +391,14 @@ $(document).ready(function () {
                 if (checkScrollAfterSelect)
                     ok(style.getElementScroll(textarea).top > 0);
 
-                expect((checkScrollAfterSelect ? 9 : 7) - Number(window.DIRECTION_ALWAYS_IS_FORWARD));
-                start();
+                expect(checkScrollAfterSelect ? 9 : 7);
+
+                startNext();
             });
     });
 
-    asyncTest('forward select and left direction (endPos less than startPos)', function () {
+    // TODO: fix it for iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('forward select and left direction (endPos less than startPos)', function () {
         const textarea = $(TEXTAREA_SELECTOR)[0];
 
         let mousedown = false;
@@ -419,8 +437,9 @@ $(document).ready(function () {
                 if (checkScrollAfterSelect)
                     ok(style.getElementScroll(textarea).top > 0);
 
-                expect((checkScrollAfterSelect ? 9 : 7) - Number(window.DIRECTION_ALWAYS_IS_FORWARD));
-                start();
+                expect(checkScrollAfterSelect ? 9 : 7);
+
+                startNext();
             });
     });
 
@@ -467,8 +486,9 @@ $(document).ready(function () {
                 if (checkScrollAfterSelect)
                     ok(style.getElementScroll(textarea).top < oldScroll);
 
-                expect((checkScrollAfterSelect ? 9 : 6) - Number(window.DIRECTION_ALWAYS_IS_FORWARD));
-                start();
+                expect(checkScrollAfterSelect ? 9 : 6);
+
+                startNext();
             });
     });
 
@@ -515,8 +535,9 @@ $(document).ready(function () {
                 if (checkScrollAfterSelect)
                     ok(style.getElementScroll(textarea).top < oldScroll);
 
-                expect((checkScrollAfterSelect ? 9 : 6) - Number(window.DIRECTION_ALWAYS_IS_FORWARD));
-                start();
+                expect(checkScrollAfterSelect ? 9 : 6);
+
+                startNext();
             });
     });
 

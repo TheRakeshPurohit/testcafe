@@ -39,3 +39,20 @@ test('Invalid selector argument (clearUpload)', async t => {
 test('Error on upload non-existing file', async t => {
     await t.setFilesToUpload('#file', ['../dummy-file-1.txt', '../dummy-file-2.txt']);
 });
+
+test('Upload the file with required input', async t => {
+    await t
+        .setFilesToUpload('#fileRequired', '../test-data/file1.txt')
+        .click('#submitRequired');
+
+    expect(await getUploadedText()).equals('File 1 is uploaded!');
+});
+
+test('Upload the xls file', async t => {
+    const file1SizeBytes = 6971392;
+
+    await t
+        .setFilesToUpload('#fileAlternative', '../test-data/file1.xls');
+
+    expect(Number(await getUploadedText())).to.be.at.least(file1SizeBytes);
+});

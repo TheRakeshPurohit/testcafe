@@ -1,4 +1,4 @@
-const expect = require('chai').expect;
+const { expect } = require('chai');
 
 // NOTE: we run tests in chrome only, because we mainly test server API functionality.
 // Actions functionality is tested in lower-level raw API.
@@ -7,13 +7,17 @@ describe('[API] t.typeText()', function () {
         return runTests('./testcafe-fixtures/type-test.js', 'Type text in input', { only: 'chrome' });
     });
 
+    it('Should type text in input with the `paste` option enabled', function () {
+        return runTests('./testcafe-fixtures/type-test.js', 'Enable the `paste` option', { only: 'chrome' });
+    });
+
     it('Should validate options', function () {
         return runTests('./testcafe-fixtures/type-test.js', 'Incorrect action options', {
             shouldFail: true,
             only:       'chrome',
         })
             .catch(function (errs) {
-                expect(errs[0]).to.contains('The "replace" option is expected to be a boolean value, but it was object.');
+                expect(errs[0]).to.contains('The "TypeOptions.replace" option is expected to be a boolean value, but it was object.');
                 expect(errs[0]).to.contains('> 27 |    await t.typeText(\'#input\', \'a\', { replace: null, paste: null });');
             });
     });
@@ -42,5 +46,38 @@ describe('[API] t.typeText()', function () {
                 );
                 expect(errs[0]).to.contains('> 19 |    await t.typeText(NaN, \'a\');');
             });
+    });
+
+    it('Should not execute selector twice for non-existing element due to "confidential" option (GH-6623)', function () {
+        return runTests('./testcafe-fixtures/type-test.js', 'Not found selector', {
+            shouldFail:      true,
+            only:            'chrome',
+            selectorTimeout: 3000,
+        })
+            .catch(function (errs) {
+                expect(testReport.durationMs).lessThan(6000);
+                expect(errs[0]).to.contains(
+                    'The specified selector does not match any element in the DOM tree.'
+                );
+                expect(errs[0]).to.contains('> 31 |    await t.typeText(\'#not-found\', \'a\');');
+            });
+    });
+
+    describe('Various combinations', function () {
+        it('Events', function () {
+            return runTests('./testcafe-fixtures/type-events-test.js', null, { only: 'chrome' });
+        });
+
+        it('Read-only input', function () {
+            return runTests('./testcafe-fixtures/read-only-test.js', null, { only: 'chrome' });
+        });
+
+        it('Input events', function () {
+            return runTests('./testcafe-fixtures/input-events-test.js', null, { only: 'chrome' });
+        });
+
+        it('Options.replace', function () {
+            return runTests('./testcafe-fixtures/options-test.js', null, { only: 'chrome' });
+        });
     });
 });

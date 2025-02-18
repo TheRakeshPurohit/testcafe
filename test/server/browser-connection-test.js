@@ -1,27 +1,19 @@
 const { expect }              = require('chai');
-const { promisify }           = require('util');
-const request                 = require('request');
+const fetch                   = require('node-fetch');
+const { noop }                = require('lodash');
 const createTestCafe          = require('../../lib/');
 const COMMAND                 = require('../../lib/browser/connection/command');
 const browserProviderPool     = require('../../lib/browser/provider/pool');
 const BrowserConnectionStatus = require('../../lib/browser/connection/status');
 
-const promisedRequest = promisify(request);
+const { createBrowserProviderMock } = require('./helpers/mocks');
 
 describe('Browser connection', function () {
-    let testCafe                  = null;
-    let connection                = null;
-    let origRemoteBrowserProvider = null;
+    let testCafe                    = null;
+    let connection                  = null;
+    let originRemoteBrowserProvider = null;
 
-    const remoteBrowserProviderMock = {
-        openBrowser: function () {
-            return Promise.resolve();
-        },
-
-        closeBrowser: function () {
-            return Promise.resolve();
-        },
-    };
+    const remoteBrowserProviderMock = createBrowserProviderMock();
 
     before(function () {
         this.timeout(20000);
@@ -33,14 +25,14 @@ describe('Browser connection', function () {
                 return browserProviderPool.getProvider('remote');
             })
             .then(function (remoteBrowserProvider) {
-                origRemoteBrowserProvider = remoteBrowserProvider;
+                originRemoteBrowserProvider = remoteBrowserProvider;
 
                 browserProviderPool.addProvider('remote', remoteBrowserProviderMock);
             });
     });
 
     after(function () {
-        browserProviderPool.addProvider('remote', origRemoteBrowserProvider);
+        browserProviderPool.addProvider('remote', originRemoteBrowserProvider);
 
         return testCafe.close();
     });
@@ -53,9 +45,10 @@ describe('Browser connection', function () {
             });
     });
 
-    afterEach(function () {
+    afterEach(async function () {
         connection._forceIdle();
-        connection.close();
+
+        await connection.close();
     });
 
     it('Should fire "ready" event and redirect to idle page once established', function () {
@@ -66,33 +59,34 @@ describe('Browser connection', function () {
         });
 
         const options = {
-            url:            connection.url,
-            followRedirect: false,
-            headers:        {
+            redirect: 'manual',
+            headers:  {
                 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 ' +
                               '(KHTML, like Gecko) Chrome/41.0.2227.1 Safari/537.36',
             },
         };
 
-        return promisedRequest(options)
+        return fetch(connection.url, options)
             .then(function (res) {
                 expect(eventFired).to.be.true;
                 expect(connection.status).eql(BrowserConnectionStatus.opened);
                 expect(connection.userAgent).eql('Chrome 41.0.2227.1 / macOS 10.10.1');
-                expect(res.statusCode).eql(302);
-                expect(res.headers['location']).eql(connection.idleUrl);
+                expect(res.status).eql(302);
+                expect(res.headers.get('location')).eql(connection.idleUrl);
             });
     });
 
     it('Should respond with error if connection was established twice', function () {
-        return promisedRequest(connection.url)
-            .then(function () {
-                return promisedRequest(connection.url);
-            })
-            .then(function (res) {
-                expect(res.statusCode).eql(500);
-                expect(res.body).eql('The connection is already established.');
-            });
+        return fetch(connection.url)
+            .then(() => fetch(connection.url)
+                .then(res => {
+                    return res.text()
+                        .then((body) => {
+                            expect(res.status).to.eql(500);
+                            expect(body).to.eql('The connection is already established.');
+                        });
+                })
+            );
     });
 
     it('Should fire "error" event on browser disconnection', function (done) {
@@ -105,7 +99,6 @@ describe('Browser connection', function () {
         });
 
         const options = {
-            url:            connection.url,
             followRedirect: false,
             headers:        {
                 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 ' +
@@ -113,28 +106,30 @@ describe('Browser connection', function () {
             },
         };
 
-        request(options);
+        fetch(connection.url, options);
     });
 
     it('Should provide status', function () {
         function createBrowserJobMock (urls) {
             return {
-                popNextTestRunUrl: function () {
+                popNextTestRunInfo: function () {
                     const url = urls.shift();
 
-                    return url;
+                    return {
+                        url,
+                        testRunId: 'testRunId' + url,
+                    };
                 },
 
                 get hasQueuedTestRuns () {
                     return urls.length;
                 },
 
-                once: function () {
-                    // Do nothing =)
-                },
+                once: noop,
+                on:   noop,
 
-                on: function () {
-                    // Do nothing
+                warningLog: {
+                    copyFrom: noop,
                 },
             };
         }
@@ -143,29 +138,56 @@ describe('Browser connection', function () {
         connection.addJob(createBrowserJobMock(['3']));
 
         function queryStatus () {
-            return promisedRequest(connection.statusDoneUrl);
+            return fetch(connection.statusDoneUrl);
         }
 
-        return promisedRequest(connection.url)
-
+        return fetch(connection.url)
             .then(queryStatus)
             .then(function (res) {
-                expect(JSON.parse(res.body)).eql({ cmd: COMMAND.run, url: '1' });
+                res.json()
+                    .then((body) => {
+                        expect(body).eql({
+                            cmd:       COMMAND.run,
+                            url:       '1',
+                            testRunId: 'testRunId1',
+                        });
+                    });
             })
 
             .then(queryStatus)
             .then(function (res) {
-                expect(JSON.parse(res.body)).eql({ cmd: COMMAND.run, url: '2' });
+                res.json()
+                    .then((body) => {
+                        expect(body).eql({
+                            cmd:       COMMAND.run,
+                            url:       '2',
+                            testRunId: 'testRunId2',
+                        });
+                    });
             })
 
             .then(queryStatus)
             .then(function (res) {
-                expect(JSON.parse(res.body)).eql({ cmd: COMMAND.run, url: '3' });
+                res.json()
+                    .then((body) => {
+                        expect(body).eql({
+                            cmd:       COMMAND.run,
+                            url:       '3',
+                            testRunId: 'testRunId3',
+                        });
+                    });
             })
 
             .then(queryStatus)
             .then(function (res) {
-                expect(JSON.parse(res.body)).eql({ cmd: COMMAND.idle, url: connection.idleUrl });
+                res.json()
+                    .then((body) => {
+                        expect(body).eql({
+                            cmd:       COMMAND.idle,
+                            url:       connection.idleUrl,
+                            testRunId: null,
+                        });
+                    });
             });
     });
 
@@ -177,9 +199,12 @@ describe('Browser connection', function () {
         ];
 
         testCases = testCases.map(function (url) {
-            return promisedRequest(url).then(function (res) {
-                expect(res.statusCode).eql(500);
-                expect(res.body).eql('The connection is not ready yet.');
+            return fetch(url).then(function (res) {
+                expect(res.status).eql(500);
+                res.text()
+                    .then(body => {
+                        expect(body).eql('The connection is not ready yet.');
+                    });
             });
         });
 
@@ -194,7 +219,6 @@ describe('Browser connection', function () {
         });
 
         const options = {
-            url:            connection.url,
             followRedirect: false,
             headers:        {
                 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 ' +
@@ -206,7 +230,7 @@ describe('Browser connection', function () {
 
         connection.setProviderMetaInfo('meta-info', { appendToUserAgent: true });
 
-        return promisedRequest(options)
+        return fetch(connection.url, options)
             .then(() => {
                 expect(eventFired).to.be.true;
 

@@ -12,9 +12,12 @@ import supportedShortcutHandlers from './shortcuts';
 import { getActualKeysAndEventKeyProperties, getDeepActiveElement } from './utils';
 import AutomationSettings from '../../settings';
 import isIframeWindow from '../../../../utils/is-window-in-iframe';
+import NativeAutomationInput from '../../../../native-automation/client/input';
+import { changeLetterCaseIfNecessary, getSimulatedKeyInfo } from '../../../../native-automation/client/key-press/utils';
+import { getModifiersBit } from '../../../../native-automation/client/utils';
+import CDPEventDescriptor from '../../../../native-automation/client/event-descriptor';
 
 const Promise        = hammerhead.Promise;
-const browserUtils   = hammerhead.utils.browser;
 const messageSandbox = hammerhead.eventSandbox.message;
 const nativeMethods  = hammerhead.nativeMethods;
 
@@ -37,15 +40,16 @@ messageSandbox.on(messageSandbox.SERVICE_MSG_RECEIVED_EVENT, e => {
 });
 
 export default class PressAutomation {
-    constructor (keyCombinations, options) {
-        this.keyCombinations       = keyCombinations;
-        this.isSelectElement       = false;
-        this.pressedKeyString      = '';
-        this.modifiersState        = null;
-        this.shortcutHandlers      = null;
-        this.topSameDomainDocument = domUtils.getTopSameDomainWindow(window).document;
-        this.automationSettings    = new AutomationSettings(options.speed);
+    constructor (keyCombinations, options, dispatchNativeAutomationEventFn) {
+        this.keyCombinations         = keyCombinations;
+        this.isSelectElement         = false;
+        this.pressedKeyString        = '';
+        this.modifiersState          = null;
+        this.shortcutHandlers        = null;
+        this.topSameDomainDocument   = domUtils.getTopSameDomainWindow(window).document;
+        this.automationSettings      = new AutomationSettings(options.speed);
         this.options               = options;
+        this.nativeAutomationInput = dispatchNativeAutomationEventFn ? new NativeAutomationInput(dispatchNativeAutomationEventFn) : null;
     }
 
     static _getKeyPressSimulators (keyCombination) {
@@ -126,8 +130,9 @@ export default class PressAutomation {
         const currentShortcutHandler = this.shortcutHandlers[this.pressedKeyString];
         let keyPressPrevented      = false;
 
-        // NOTE: B254435
-        if (!currentShortcutHandler || browserUtils.isFirefox || keyPressSimulator.key === 'enter')
+        // NOTE: Old firefox prevented shortcut keys via preventDefault(B254435).
+        // Now this behavior the same as in other modern browsers
+        if (!currentShortcutHandler || keyPressSimulator.key === 'enter')
             keyPressPrevented = !keyPressSimulator.press(this.modifiersState);
 
         if ((!keyPressPrevented || this.isSelectElement) && currentShortcutHandler) {
@@ -164,6 +169,38 @@ export default class PressAutomation {
             });
     }
 
+    _calculateCDPEventSequence () {
+        const eventSequence = [];
+
+        for (const keyCombination of this.keyCombinations) {
+            const simulatedKeyInfos = getSimulatedKeyInfo(keyCombination);
+            let modifiersBit        = 0;
+
+            for (const keyInfo of simulatedKeyInfos) {
+                modifiersBit     |= getModifiersBit(keyInfo.key);
+                keyInfo.modifiers = modifiersBit;
+
+                changeLetterCaseIfNecessary(keyInfo);
+
+                eventSequence.push(
+                    CDPEventDescriptor.keyDown(keyInfo),
+                    CDPEventDescriptor.delay(this.automationSettings.keyActionStepDelay)
+                );
+            }
+
+            for (let i = simulatedKeyInfos.length - 1; i >= 0; i--) {
+                const keyInfo = simulatedKeyInfos[i];
+
+                modifiersBit     &= ~getModifiersBit(keyInfo.key);
+                keyInfo.modifiers = modifiersBit;
+
+                eventSequence.push(CDPEventDescriptor.keyUp(keyInfo));
+            }
+        }
+
+        return eventSequence;
+    }
+
     run () {
         const activeElement         = domUtils.getActiveElement();
         const activeElementIsIframe = domUtils.isIframeElement(activeElement);
@@ -176,6 +213,12 @@ export default class PressAutomation {
             };
 
             return sendRequestToFrame(msg, PRESS_RESPONSE_CMD, nativeMethods.contentWindowGetter.call(activeElement));
+        }
+
+        if (this.nativeAutomationInput) {
+            const eventSequence = this._calculateCDPEventSequence();
+
+            return this.nativeAutomationInput.executeEventSequence(eventSequence);
         }
 
         return promiseUtils.each(this.keyCombinations, combination => {

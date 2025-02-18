@@ -43,7 +43,9 @@ class LiveModeRunner extends Runner {
                 this.testRunController.setExpectedTestCount(expectedTestCount);
             })
             .then(() => {
-                this.runnerTaskPromise = super.run(this.opts);
+                this._resetBeforeRun();
+                this.bootstrapper.restoreMessageBusListeners();
+                this.runnerTaskPromise = this._prepareAndRunTask(this.opts);
 
                 return this.runnerTaskPromise;
             })
@@ -99,9 +101,10 @@ class LiveModeRunner extends Runner {
                 delete this._running;
             });
 
-        this.opts = Object.assign({}, this.opts, options);
+        this._options = Object.assign({}, this._options, options);
 
-        this._applyOptions()
+        this._setConfigurationOptions()
+            .then(() => this._setBootstrapperOptions())
             .then(() => parseFileList(this.bootstrapper.sources, process.cwd()))
             .then(files => {
                 return this.controller.init(files);
@@ -145,7 +148,7 @@ class LiveModeRunner extends Runner {
     }
 
     async _finishPreviousTestRuns () {
-        if (!this.configurationCache.tests) return;
+        if (!this.configurationCache?.tests) return;
 
         this.testRunController.run();
     }
@@ -154,6 +157,11 @@ class LiveModeRunner extends Runner {
         if (isFirstRun) {
             if (this.bootstrappingError)
                 return Promise.reject(this.bootstrappingError);
+
+            else if (!this.configurationCache) {
+                // NOTE: Such errors handled in process.on('unhandledRejection') handler.
+                return Promise.reject(null);
+            }
 
             return Promise.resolve();
         }
@@ -172,8 +180,8 @@ class LiveModeRunner extends Runner {
         return super._createTask(tests, browserConnectionGroups, proxy, opts, this.warningLog);
     }
 
-    _createBootstrapper (browserConnectionGateway) {
-        return new LiveModeBootstrapper(this, browserConnectionGateway);
+    _createBootstrapper (browserConnectionGateway, messageBus) {
+        return new LiveModeBootstrapper(this, browserConnectionGateway, messageBus);
     }
 
     _createController () {

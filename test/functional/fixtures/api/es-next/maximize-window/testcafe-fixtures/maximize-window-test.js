@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { ClientFunction } from 'testcafe';
-import { saveWindowState, restoreWindowState } from '../../../../../window-helpers';
+import { saveWindowState, restoreWindowState } from '../../../../../esm-utils/window-helpers.js';
 
 
 const getWindowDimensionsInfo = ClientFunction(() => {
@@ -12,6 +12,10 @@ const getWindowDimensionsInfo = ClientFunction(() => {
         availableHeight: screen.availHeight,
         availableWidth:  screen.availWidth,
     };
+});
+
+const isHeadlessChrome = ClientFunction(() => {
+    return /HeadlessChrome/.test(window.navigator.userAgent);
 });
 
 const INITIAL_SIZE = 500;
@@ -29,9 +33,18 @@ fixture `Maximize Window`
 
 test('Maximize window', async t => {
     await t.maximizeWindow();
+    const isHeadless = await isHeadlessChrome();
 
     const dimensions = await getWindowDimensionsInfo();
 
-    expect(dimensions.outerWidth).to.be.at.least(dimensions.availableWidth);
-    expect(dimensions.outerHeight).to.be.at.least(dimensions.availableHeight);
+    // HACK: headless outerWidth/Height and availHeight/Width are random and different
+    // that is why we check with innerWidth/Height
+    if (isHeadless) {
+        expect(dimensions.innerWidth).to.be.at.least(dimensions.availableWidth);
+        expect(dimensions.innerHeight).to.be.at.least(dimensions.availableHeight);
+    }
+    else {
+        expect(dimensions.outerWidth).to.be.at.least(dimensions.availableWidth);
+        expect(dimensions.outerHeight).to.be.at.least(dimensions.availableHeight);
+    }
 });

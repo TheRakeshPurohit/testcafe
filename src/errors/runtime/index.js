@@ -1,12 +1,51 @@
 import TEMPLATES from './templates';
 import createStackFilter from '../create-stack-filter';
-import { getCallsiteForMethod } from '../get-callsite';
+import { getCallsiteForError, getCallsiteForMethod } from '../get-callsite';
 import renderTemplate from '../../utils/render-template';
 import renderCallsiteSync from '../../utils/render-callsite-sync';
 import { RUNTIME_ERRORS } from '../types';
 import getRenderers from '../../utils/get-renderes';
+import util from 'util';
+import semver from 'semver';
+import { removePreventModuleCachingSuffix } from '../test-run/utils';
+import REPORTER_MODULE_PREFIX from '../../reporter/module-prefix';
 
-const ERROR_SEPARATOR = '\n\n';
+const ERROR_SEPARATOR        = '\n\n';
+const NO_STACK_AVAILABLE_MSG = 'No stack trace is available for this error';
+const MODULE_NOT_FOUND_CODE  = 'MODULE_NOT_FOUND';
+
+function formatErrorWithCallsite (error) {
+    let formattedMessage = '';
+
+    try {
+        const callsite    = getCallsiteForError(error);
+        const stackFilter = createStackFilter();
+
+        // NOTE: If file from stack doesn't exist an error will be raised here:
+        formattedMessage = callsite?.renderSync({ stackFilter }) || NO_STACK_AVAILABLE_MSG;
+    }
+    catch {
+        formattedMessage = NO_STACK_AVAILABLE_MSG;
+    }
+
+    return `${error.message}\n\n${formattedMessage}`;
+}
+
+function isModuleNotFoundError (error) {
+    return error.code && error.code === MODULE_NOT_FOUND_CODE;
+}
+
+// NOTE: The "message" property of the ModuleNotFound error has the following pattern: <message>\nRequire stack:\n<line1>\n<line2>.
+// This code removes lines bellow the targetPath. In case of "require('testcafe-reporter-<name>')" it removes all the Require stack.
+function formatModuleNotFoundErrorRequireStack (message, targetPath) {
+    const messageLines    = message.split('\n');
+    const targetLineIndex = messageLines.findIndex(line => line.includes(targetPath));
+
+    if (targetLineIndex === -1)
+        return message;
+
+    return messageLines.slice(0, targetLineIndex + 1).join('\n');
+}
 
 class ProcessTemplateInstruction {
     constructor (processFn) {
@@ -34,7 +73,7 @@ export class GeneralError extends Error {
 export class TestCompilationError extends Error {
     constructor (originalError) {
         const template     = TEMPLATES[RUNTIME_ERRORS.cannotPrepareTestsDueToError];
-        const errorMessage = originalError.toString();
+        const errorMessage = removePreventModuleCachingSuffix(originalError.toString());
 
         super(renderTemplate(template, errorMessage));
 
@@ -43,13 +82,13 @@ export class TestCompilationError extends Error {
             data: [errorMessage],
         });
 
-        // NOTE: stack includes message as well.
-        this.stack = renderTemplate(template, originalError.stack);
+        // NOTE: The stack includes the error message.
+        this.stack = renderTemplate(template, removePreventModuleCachingSuffix(originalError.stack));
     }
 }
 
 export class APIError extends Error {
-    constructor (methodName, code, ...args) {
+    constructor (callsite, code, ...args) {
         let template = TEMPLATES[code];
 
         template = APIError._prepareTemplateAndArgsIfNecessary(template, args);
@@ -62,9 +101,13 @@ export class APIError extends Error {
 
         // NOTE: `rawMessage` is used in error substitution if it occurs in test run.
         this.rawMessage = rawMessage;
-        this.callsite   = getCallsiteForMethod(methodName);
 
-        // NOTE: We need property getters here because callsite can be replaced by an external code.
+        if (typeof callsite === 'object')
+            this.callsite = callsite;
+        else
+            this.callsite = getCallsiteForMethod(callsite);
+
+        // NOTE: Property getters are necessary because the callsite can be replaced with external code.
         // See https://github.com/DevExpress/testcafe/blob/v1.0.0/src/compiler/test-file/formats/raw.js#L22
         // Also we can't use an ES6 getter for the 'stack' property, because it will create a getter on the class prototype
         // that cannot override the instance property created by the Error parent class.
@@ -124,10 +167,22 @@ export class CompositeError extends Error {
 
 export class ReporterPluginError extends GeneralError {
     constructor ({ name, method, originalError }) {
-        const code = RUNTIME_ERRORS.uncaughtErrorInReporter;
+        const code          = RUNTIME_ERRORS.uncaughtErrorInReporter;
+        const preparedStack = ReporterPluginError._prepareStack(originalError);
 
-        super(code, method, name, originalError.stack);
+        super(code, method, name, preparedStack);
     }
+
+    static _prepareStack (err) {
+        if (!err?.stack) {
+            const inspectedObject = util.inspect(err);
+
+            return `No stack trace is available for the raised error.\nError object inspection:\n${inspectedObject}`;
+        }
+
+        return err.stack;
+    }
+
 }
 
 export class TimeoutError extends GeneralError {
@@ -141,3 +196,70 @@ export class BrowserConnectionError extends GeneralError {
         super(RUNTIME_ERRORS.browserConnectionError, ...args);
     }
 }
+
+export class RequestRuntimeError extends APIError {
+    constructor (methodName, code, ...args) {
+        super(methodName, code, ...args);
+    }
+}
+
+export class SkipJsErrorsArgumentApiError extends APIError {
+    constructor (code, ...args) {
+        super('skipJsErrors', code, ...args);
+    }
+}
+
+export class ImportESMInCommonJSError extends GeneralError {
+    constructor (originalError, targetFile) {
+        const esModule = ImportESMInCommonJSError._getESModule(originalError);
+
+        super(RUNTIME_ERRORS.cannotImportESMInCommonsJS, esModule, targetFile);
+    }
+
+    static _getESModule (err) {
+        const regExp       = semver.gte(process.version, '16.0.0') ? new RegExp(/ES Module (\S*)/) : /ES Module: (\S*)/;
+        const [, esModule] = err.toString().match(regExp);
+
+        return esModule;
+    }
+}
+
+export class ReadConfigFileError extends GeneralError {
+    constructor (code, originalError, filePath, renderCallsite) {
+        super(code, filePath, ReadConfigFileError._getFormattedMessage(originalError, renderCallsite, filePath));
+    }
+
+    static _getFormattedMessage (originalError, renderCallsite, filePath) {
+        if (!renderCallsite)
+            return originalError.message;
+
+        if (isModuleNotFoundError(originalError))
+            return formatModuleNotFoundErrorRequireStack(originalError.message, filePath);
+
+        return formatErrorWithCallsite(originalError);
+    }
+}
+
+export class LoadReporterError extends GeneralError {
+    constructor (originalError, reporterFullName) {
+        const reporterShortName      = LoadReporterError._ensureShortName(reporterFullName);
+        const formattedOriginalError = LoadReporterError._getFormattedMessage(originalError, reporterFullName);
+
+        super(RUNTIME_ERRORS.cannotFindReporterForAlias, reporterShortName, formattedOriginalError);
+    }
+
+    static _ensureShortName (name) {
+        if (name && name.startsWith(REPORTER_MODULE_PREFIX))
+            return name.replace(REPORTER_MODULE_PREFIX, '');
+
+        return name;
+    }
+
+    static _getFormattedMessage (originalError, reporterFullName) {
+        if (isModuleNotFoundError(originalError))
+            return formatModuleNotFoundErrorRequireStack(originalError.message, reporterFullName);
+
+        return formatErrorWithCallsite(originalError);
+    }
+}
+

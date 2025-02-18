@@ -42,15 +42,15 @@ export class DomNodeClientFunctionResultError extends TestRunErrorBase {
     }
 }
 
-
 // Selector errors
 //--------------------------------------------------------------------
 export class SelectorErrorBase extends TestRunErrorBase {
-    constructor (code, { apiFnChain, apiFnIndex }, callsite) {
+    constructor (code, { apiFnChain, apiFnIndex, reason } = {}, callsite) {
         super(code, callsite);
 
         this.apiFnChain = apiFnChain;
         this.apiFnIndex = apiFnIndex;
+        this.reason     = reason;
     }
 }
 
@@ -143,6 +143,62 @@ export class ActionSpeedOptionError extends ActionOptionErrorBase {
     }
 }
 
+export class ActionStringOptionError extends ActionOptionErrorBase {
+    constructor (optionName, actualValue) {
+        super(TEST_RUN_ERRORS.actionStringOptionError, optionName, actualValue);
+    }
+}
+export class ActionStringOrRegexOptionError extends ActionOptionErrorBase {
+    constructor (optionName, actualValue) {
+        super(TEST_RUN_ERRORS.actionStringOrRegexOptionError, optionName, actualValue);
+    }
+}
+
+export class ActionDateOptionError extends ActionOptionErrorBase {
+    constructor (optionName, actualValue) {
+        super(TEST_RUN_ERRORS.actionDateOptionError, optionName, actualValue);
+    }
+}
+
+export class ActionNumberOptionError extends ActionOptionErrorBase {
+    constructor (optionName, actualValue) {
+        super(TEST_RUN_ERRORS.actionNumberOptionError, optionName, actualValue);
+    }
+}
+
+export class ActionUrlOptionError extends ActionOptionErrorBase {
+    constructor (optionName, actualValue) {
+        super(TEST_RUN_ERRORS.actionUrlOptionError, optionName, actualValue);
+    }
+}
+
+export class ActionUrlSearchParamsOptionError extends ActionOptionErrorBase {
+    constructor (optionName, actualValue) {
+        super(TEST_RUN_ERRORS.actionUrlSearchParamsOptionError, optionName, actualValue);
+    }
+}
+
+export class ActionObjectOptionError extends ActionOptionErrorBase {
+    constructor (optionName, actualValue) {
+        super(TEST_RUN_ERRORS.actionObjectOptionError, optionName, actualValue);
+    }
+}
+
+export class ActionFunctionOptionError extends ActionOptionErrorBase {
+    constructor (optionName, actualValue) {
+        super(TEST_RUN_ERRORS.actionFunctionOptionError, optionName, actualValue);
+    }
+}
+
+export class ActionInvalidObjectPropertyError extends TestRunErrorBase {
+    constructor (objectName, propertyName, availableProperties) {
+        super(TEST_RUN_ERRORS.actionInvalidObjectPropertyError);
+
+        this.objectName          = objectName;
+        this.propertyName        = propertyName;
+        this.availableProperties = availableProperties;
+    }
+}
 
 // Action execution errors
 //--------------------------------------------------------------------
@@ -152,9 +208,9 @@ export class ActionElementNotFoundError extends SelectorErrorBase {
     }
 }
 
-export class ActionElementIsInvisibleError extends TestRunErrorBase {
-    constructor (callsite) {
-        super(TEST_RUN_ERRORS.actionElementIsInvisibleError, callsite);
+export class ActionElementIsInvisibleError extends SelectorErrorBase {
+    constructor (callsite, apiFnArgs) {
+        super(TEST_RUN_ERRORS.actionElementIsInvisibleError, apiFnArgs, callsite);
     }
 }
 
@@ -174,9 +230,15 @@ export class ActionAdditionalElementNotFoundError extends SelectorErrorBase {
     }
 }
 
-export class ActionAdditionalElementIsInvisibleError extends TestRunErrorBase {
-    constructor (argumentName) {
-        super(TEST_RUN_ERRORS.actionAdditionalElementIsInvisibleError);
+export class ActionElementIsNotTargetError extends TestRunErrorBase {
+    constructor (callsite) {
+        super(TEST_RUN_ERRORS.actionElementIsNotTargetError, callsite);
+    }
+}
+
+export class ActionAdditionalElementIsInvisibleError extends SelectorErrorBase {
+    constructor (argumentName, apiFnArgs) {
+        super(TEST_RUN_ERRORS.actionAdditionalElementIsInvisibleError, apiFnArgs);
 
         this.argumentName = argumentName;
     }
@@ -405,5 +467,11 @@ export class UncaughtErrorInNativeDialogHandler extends TestRunErrorBase {
         this.dialogType = dialogType;
         this.errMsg     = errMsg;
         this.pageUrl    = url;
+    }
+}
+
+export class MultipleWindowsModeIsNotSupportedInNativeAutomationModeError extends TestRunErrorBase {
+    constructor () {
+        super(TEST_RUN_ERRORS.multipleWindowsModeIsNotSupportedInNativeAutomationError);
     }
 }

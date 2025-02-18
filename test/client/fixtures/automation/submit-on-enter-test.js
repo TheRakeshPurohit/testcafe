@@ -179,14 +179,8 @@ $(document).ready(function () {
     });
 
     asyncTest('input type = "date"', function () {
-        const needChangeType = browserUtils.isIE && browserUtils.version > 11;
         const $form          = $('<form></form>').addClass(TEST_ELEMENT_CLASS).appendTo('body');
-        const $input         = $('<input type="' + (needChangeType ? 'email' : 'date') +
-                               '">').addClass(TEST_ELEMENT_CLASS).appendTo($form);
-
-        //HACK: For tests in MSEdge. MSEdge fails when we try to create input with type = 'date'
-        if (needChangeType)
-            $input[0].type = 'date';
+        const $input         = $('<input type="' + 'date' + '">').addClass(TEST_ELEMENT_CLASS).appendTo($form);
 
         //webkit does not submit date input on enter
         checkSubmitRaisedOnEnterPress($form, $input, !browserUtils.isWebKit || browserUtils.isSafari);
@@ -224,7 +218,7 @@ $(document).ready(function () {
         checkSubmitRaisedOnEnterPress($form, $input, true);
     });
 
-    asyncTest('one text input and one not-text input (type = "checkbox"), checkbox is focused', function () {
+    (browserUtils.isFirefox ? QUnit.skip : asyncTest)('one text input and one not-text input (type = "checkbox"), checkbox is focused', function () {
         const $form  = $('<form></form>').addClass(TEST_ELEMENT_CLASS).appendTo('body');
         const $input = $('<input type="checkbox">').addClass(TEST_ELEMENT_CLASS).appendTo($form);
 

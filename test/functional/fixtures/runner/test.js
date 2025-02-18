@@ -1,5 +1,5 @@
 const path       = require('path');
-const os         = require('os-family');
+const osFamily   = require('os-family');
 const { expect } = require('chai');
 const config     = require('../../config');
 
@@ -8,11 +8,11 @@ function run (browsers, testFile) {
         .createRunner()
         .src(path.join(__dirname, testFile))
         .browsers(browsers)
-        .run();
+        .run({ disableNativeAutomation: !config.nativeAutomation });
 }
 
 describe('Runner', () => {
-    if (config.useLocalBrowsers && !config.useHeadlessBrowsers && os.linux) {
+    if (config.useLocalBrowsers && !config.useHeadlessBrowsers && osFamily.linux) {
         let originalDisplay = null;
 
         before(() => {

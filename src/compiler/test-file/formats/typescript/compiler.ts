@@ -8,7 +8,7 @@ import { GeneralError } from '../../../../errors/runtime';
 import { RUNTIME_ERRORS } from '../../../../errors/types';
 import debug from 'debug';
 import { isRelative } from '../../../../api/test-page-url';
-import EXPORTABLE_LIB_PATH from '../../exportble-lib-path';
+import getExportableLibPath from '../../get-exportable-lib-path';
 import DISABLE_V8_OPTIMIZATION_NOTE from '../../disable-v8-optimization-note';
 
 // NOTE: For type definitions only
@@ -18,21 +18,20 @@ import TypeScript, {
     VisitResult,
     Visitor,
     Node,
-    createStringLiteral,
     visitEachChild,
     visitNode,
     TransformerFactory,
-    createExpressionStatement,
-    createCall,
-    createIdentifier,
-    updateSourceFileNode,
     SourceFile,
     addSyntheticLeadingComment,
 } from 'typescript';
 
 import { Dictionary, TypeScriptCompilerOptions } from '../../../../configuration/interfaces';
+import { OptionalCompilerArguments } from '../../../interfaces';
+import Extensions from '../extensions';
 
 declare type TypeScriptInstance = typeof TypeScript;
+
+const tsFactory = TypeScript.factory;
 
 interface TestFileInfo {
     filename: string;
@@ -46,12 +45,15 @@ interface RequireCompilers {
     [extension: string]: RequireCompilerFunction;
 }
 
-function testcafeImportPathReplacer<T extends Node> (): TransformerFactory<T> {
+function testcafeImportPathReplacer<T extends Node> (esm?: boolean): TransformerFactory<T> {
     return context => {
         const visit: Visitor = (node): VisitResult<Node> => {
             // @ts-ignore
-            if (node.parent?.kind === SyntaxKind.ImportDeclaration && node.kind === SyntaxKind.StringLiteral && node.text === 'testcafe')
-                return createStringLiteral(EXPORTABLE_LIB_PATH);
+            if (node.parent?.kind === SyntaxKind.ImportDeclaration && node.kind === SyntaxKind.StringLiteral && node.text === 'testcafe') {
+                const libPath = getExportableLibPath(esm);
+
+                return tsFactory.createStringLiteral(libPath);
+            }
 
             return visitEachChild(node, child => visit(child), context);
         };
@@ -63,16 +65,16 @@ function testcafeImportPathReplacer<T extends Node> (): TransformerFactory<T> {
 function disableV8OptimizationCodeAppender<T extends Node> (): TransformerFactory<T> {
     return () => {
         const visit: Visitor = (node): VisitResult<Node> => {
-            const evalStatement = createExpressionStatement(createCall(
-                createIdentifier('eval'),
+            const evalStatement = tsFactory.createExpressionStatement(tsFactory.createCallExpression(
+                tsFactory.createIdentifier('eval'),
                 void 0,
-                [createStringLiteral('')]
+                [tsFactory.createStringLiteral('')]
             ));
 
             const evalStatementWithComment = addSyntheticLeadingComment(evalStatement, SyntaxKind.MultiLineCommentTrivia, DISABLE_V8_OPTIMIZATION_NOTE, true);
 
             // @ts-ignore
-            return updateSourceFileNode(node, [...node.statements, evalStatementWithComment]);
+            return tsFactory.updateSourceFile(node, [...node.statements, evalStatementWithComment]);
         };
 
         return node => visitNode(node, visit);
@@ -82,7 +84,7 @@ function disableV8OptimizationCodeAppender<T extends Node> (): TransformerFactor
 
 const DEBUG_LOGGER = debug('testcafe:compiler:typescript');
 
-const RENAMED_DEPENDENCIES_MAP = new Map([['testcafe', EXPORTABLE_LIB_PATH]]);
+const RENAMED_DEPENDENCIES_MAP = new Map([['testcafe', getExportableLibPath()]]);
 
 const DEFAULT_TYPESCRIPT_COMPILER_PATH = 'typescript';
 
@@ -93,8 +95,8 @@ export default class TypeScriptTestFileCompiler extends APIBasedTestFileCompiler
     private readonly _compilerPath: string;
     private readonly _customCompilerOptions?: object;
 
-    public constructor (compilerOptions?: TypeScriptCompilerOptions, isCompilerServiceMode?: boolean) {
-        super(isCompilerServiceMode);
+    public constructor (compilerOptions?: TypeScriptCompilerOptions, { baseUrl, esm }: OptionalCompilerArguments = {}) {
+        super({ baseUrl, esm });
 
         // NOTE: At present, it's necessary create an instance TypeScriptTestFileCompiler
         // to collect a list of supported test file extensions.
@@ -105,7 +107,7 @@ export default class TypeScriptTestFileCompiler extends APIBasedTestFileCompiler
         const configPath = compilerOptions && compilerOptions.configPath || null;
 
         this._customCompilerOptions = compilerOptions && compilerOptions.options;
-        this._tsConfig              = new TypescriptConfiguration(configPath, isCompilerServiceMode);
+        this._tsConfig              = new TypescriptConfiguration(configPath, esm);
         this._compilerPath          = TypeScriptTestFileCompiler._getCompilerPath(compilerOptions);
     }
 
@@ -130,7 +132,7 @@ export default class TypeScriptTestFileCompiler extends APIBasedTestFileCompiler
         try {
             return require(this._compilerPath);
         }
-        catch (err) {
+        catch (err: any) {
             throw new GeneralError(RUNTIME_ERRORS.typeScriptCompilerLoadingError, err.message);
         }
     }
@@ -177,7 +179,10 @@ export default class TypeScriptTestFileCompiler extends APIBasedTestFileCompiler
     }
 
     private _compileFilesToCache (ts: TypeScriptInstance, filenames: string[]): void {
-        const opts    = this._tsConfig.getOptions() as Dictionary<CompilerOptionsValue>;
+        const opts = this._tsConfig.getOptions() as Dictionary<CompilerOptionsValue>;
+
+        filenames = filenames.map(name => TypeScriptTestFileCompiler._normalizeFilename(name));
+
         const program = ts.createProgram([TypeScriptTestFileCompiler.tsDefsPath, ...filenames], opts);
 
         DEBUG_LOGGER('version: %s', ts.version);
@@ -209,9 +214,9 @@ export default class TypeScriptTestFileCompiler extends APIBasedTestFileCompiler
     }
 
     private _getTypescriptTransformers (): TransformerFactory<SourceFile>[] {
-        const transformers: TransformerFactory<SourceFile>[] = [testcafeImportPathReplacer()];
+        const transformers: TransformerFactory<SourceFile>[] = [testcafeImportPathReplacer(this.esm)];
 
-        if (this.isCompilerServiceMode)
+        if (this.esm)
             transformers.push(disableV8OptimizationCodeAppender());
 
         return transformers;
@@ -237,19 +242,29 @@ export default class TypeScriptTestFileCompiler extends APIBasedTestFileCompiler
     }
 
     public _getRequireCompilers (): RequireCompilers {
-        return {
-            '.ts':  (code, filename) => this._compileCode(code, filename),
-            '.tsx': (code, filename) => this._compileCode(code, filename),
-            '.js':  (code, filename) => ESNextTestFileCompiler.prototype._compileCode.call(this, code, filename),
-            '.jsx': (code, filename) => ESNextTestFileCompiler.prototype._compileCode.call(this, code, filename),
+        const requireCompilers: RequireCompilers = {
+            [Extensions.ts]:  (code, filename) => this._compileCode(code, filename),
+            [Extensions.tsx]: (code, filename) => this._compileCode(code, filename),
+            [Extensions.js]:  (code, filename) => ESNextTestFileCompiler.prototype._compileCode.call(this, code, filename),
+            [Extensions.cjs]: (code, filename) => ESNextTestFileCompiler.prototype._compileCode.call(this, code, filename),
+            [Extensions.jsx]: (code, filename) => ESNextTestFileCompiler.prototype._compileCode.call(this, code, filename),
         };
+
+        if (this.esm)
+            requireCompilers[Extensions.mjs] = (code, filename) => ESNextTestFileCompiler.prototype._compileCode.call(this, code, filename);
+
+        return requireCompilers;
     }
 
     public get canPrecompile (): boolean {
         return true;
     }
 
+    public get canCompileInEsm (): boolean {
+        return true;
+    }
+
     public getSupportedExtension (): string[] {
-        return ['.ts', '.tsx'];
+        return [Extensions.ts, Extensions.tsx];
     }
 }

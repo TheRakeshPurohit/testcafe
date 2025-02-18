@@ -4,19 +4,22 @@ import { TestRun as LegacyTestRun } from 'testcafe-legacy-api';
 import TestRun from '../test-run';
 import SessionController from '../test-run/session-controller';
 import BrowserConnection from '../browser/connection';
-import { Proxy } from 'testcafe-hammerhead';
+import { Proxy, generateUniqueId } from 'testcafe-hammerhead';
 import Test from '../api/structure/test';
 import Screenshots from '../screenshots';
 import WarningLog from '../notifications/warning-log';
 import FixtureHookController from './fixture-hook-controller';
 import { Dictionary } from '../configuration/interfaces';
 import { ActionEventArg, TestRunControllerInit } from './interfaces';
-import CompilerService from '../services/compiler/host';
 import { Quarantine } from '../utils/get-options/quarantine';
 import MessageBus from '../utils/message-bus';
+import TestRunHookController from './test-run-hook-controller';
+import * as clientScriptsRouting from '../custom-client-scripts/routing';
+import { RUNTIME_ERRORS } from '../errors/types';
+import { GeneralError } from '../errors/runtime';
+import { testRunControllerLogger } from '../utils/debug-loggers';
 
 const DISCONNECT_THRESHOLD = 3;
-
 
 export default class TestRunController extends AsyncEventEmitter {
     private readonly _quarantine: null | Quarantine;
@@ -31,8 +34,11 @@ export default class TestRunController extends AsyncEventEmitter {
     private readonly _testRunCtor: LegacyTestRun['constructor'] | TestRun['constructor'];
     public testRun: null | LegacyTestRun | TestRun;
     public done: boolean;
-    private readonly compilerService?: CompilerService;
     private readonly _messageBus: MessageBus;
+    private readonly _testRunHook: TestRunHookController;
+    private clientScriptRoutes: string[] = [];
+    private isNativeAutomation = false;
+    public readonly id: string;
 
     public constructor ({
         test,
@@ -42,7 +48,7 @@ export default class TestRunController extends AsyncEventEmitter {
         warningLog,
         fixtureHookController,
         opts,
-        compilerService,
+        testRunHook,
         messageBus,
     }: TestRunControllerInit) {
         super();
@@ -50,11 +56,13 @@ export default class TestRunController extends AsyncEventEmitter {
         this.test  = test;
         this.index = index;
         this._opts = opts;
+        this.id    = generateUniqueId();
 
         this._proxy                 = proxy;
         this._screenshots           = screenshots;
         this._warningLog            = warningLog;
         this._fixtureHookController = fixtureHookController;
+        this._testRunHook           = testRunHook;
 
         this._testRunCtor = TestRunController._getTestRunCtor(test, opts);
 
@@ -62,7 +70,6 @@ export default class TestRunController extends AsyncEventEmitter {
         this.done                = false;
         this._quarantine         = this._opts.quarantineMode ? new Quarantine() : null;
         this._disconnectionCount = 0;
-        this.compilerService     = compilerService;
         this._messageBus         = messageBus;
     }
 
@@ -73,7 +80,7 @@ export default class TestRunController extends AsyncEventEmitter {
         return (test as LegacyTestRun).isLegacy ? LegacyTestRun : TestRun;
     }
 
-    private async _createTestRun (connection: BrowserConnection): Promise<TestRun | LegacyTestRun> {
+    private async _createTestRun (connection: BrowserConnection, startRunExecutionTime?: Date): Promise<TestRun | LegacyTestRun> {
         const screenshotCapturer = this._screenshots.createCapturerFor(this.test, this.index, this._quarantine, connection, this._warningLog);
         const TestRunCtor        = this._testRunCtor;
 
@@ -82,10 +89,21 @@ export default class TestRunController extends AsyncEventEmitter {
             browserConnection: connection,
             globalWarningLog:  this._warningLog,
             opts:              this._opts,
-            compilerService:   this.compilerService,
             messageBus:        this._messageBus,
+            nativeAutomation:  this.isNativeAutomation,
             screenshotCapturer,
+            startRunExecutionTime,
         });
+
+        this.clientScriptRoutes = clientScriptsRouting.register({
+            proxy:            this._proxy,
+            test:             this.test,
+            nativeAutomation: this.isNativeAutomation,
+            folderName:       this.testRun.id,
+        });
+
+        if (this.isNativeAutomation)
+            connection.resetActiveWindowId();
 
         await this.testRun.initialize();
 
@@ -126,7 +144,7 @@ export default class TestRunController extends AsyncEventEmitter {
         const attempts       = (this._quarantine as Quarantine).attempts;
         const isFirstAttempt = this._isFirstQuarantineAttempt();
 
-        attempts.push(errors);
+        attempts.push({ testRunId: this.testRun.id, errors });
 
         return isFirstAttempt ? hasErrors : !(this._quarantine as Quarantine).isThresholdReached();
     }
@@ -169,10 +187,15 @@ export default class TestRunController extends AsyncEventEmitter {
         // NOTE: we should report test run completion in order they were completed in browser.
         // To keep a sequence after fixture hook execution we use completion queue.
         await this._fixtureHookController.runFixtureAfterHookIfNecessary(this.testRun);
+        await this._testRunHook.runTestRunAfterHookIfNecessary(this.testRun);
+
+        clientScriptsRouting.unRegister(this._proxy, this.clientScriptRoutes);
 
         this.done = true;
 
         await this.emit('test-run-done');
+
+        testRunControllerLogger('done %s', this.id);
     }
 
     private async _emitTestRunStart (): Promise<void> {
@@ -196,10 +219,10 @@ export default class TestRunController extends AsyncEventEmitter {
     private _testRunDisconnected (connection: BrowserConnection): Promise<void> {
         this._disconnectionCount++;
 
-        const disconnectionThresholdExceedeed = this._disconnectionCount >= DISCONNECT_THRESHOLD;
+        const disconnectionThresholdExceeded = this._disconnectionCount >= DISCONNECT_THRESHOLD;
 
         return connection
-            .processDisconnection(disconnectionThresholdExceedeed)
+            .processDisconnection(disconnectionThresholdExceeded)
             .then(() => {
                 return this._restartTest();
             });
@@ -223,10 +246,41 @@ export default class TestRunController extends AsyncEventEmitter {
         return this._fixtureHookController.isTestBlocked(this.test);
     }
 
-    public async start (connection: BrowserConnection): Promise<string | null> {
-        const testRun = await this._createTestRun(connection);
+    private async _handleNativeAutomationMode (connection: BrowserConnection): Promise<void> {
+        this.isNativeAutomation = !this._opts.disableNativeAutomation;
 
-        const hookOk = await this._fixtureHookController.runFixtureBeforeHookIfNecessary(testRun);
+        const supportNativeAutomation = connection.supportNativeAutomation();
+
+        if (!this.isNativeAutomation || supportNativeAutomation)
+            return;
+
+        await this._messageBus.emit('before-test-run-created-error');
+
+        throw new GeneralError(RUNTIME_ERRORS.setNativeAutomationForUnsupportedBrowsers, connection.browserInfo.providerName);
+    }
+
+    public async start (connection: BrowserConnection, startRunExecutionTime?: Date): Promise<string | null> {
+        testRunControllerLogger('start %s %O %O', this.id, {
+            test: {
+                name: this.test.name,
+                id:   this.test.id,
+            },
+            connection: {
+                userAgent: connection.userAgent,
+                id:        connection.id,
+            },
+        });
+
+        await this._handleNativeAutomationMode(connection);
+
+        this._fixtureHookController.blockTestIfNecessary(this.test);
+
+        const testRun = await this._createTestRun(connection, startRunExecutionTime);
+
+        const hookOk = await this._testRunHook.runTestRunBeforeHookIfNecessary(testRun)
+                       && await this._fixtureHookController.runFixtureBeforeHookIfNecessary(testRun);
+
+        this._fixtureHookController.unblockTest(this.test);
 
         if (this.test.skip || !hookOk) {
             await this._emitTestRunStart();

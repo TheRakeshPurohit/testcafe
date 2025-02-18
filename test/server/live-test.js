@@ -7,6 +7,7 @@ const LiveModeController            = require('../../lib/live/controller');
 const LiveModeRunner                = require('../../lib/live/test-runner');
 const LiveModeBootstrapper          = require('../../lib/live/bootstrapper');
 const LiveModeKeyboardEventObserver = require('../../lib/live/keyboard-observer');
+const { browserSetMock }            = require('./helpers/mocks');
 
 const testFileWithSingleTestPath               = path.resolve('test/server/data/test-suites/live/test.js');
 const testFileWithMultipleTestsPath            = path.resolve('test/server/data/test-suites/live/multiple-tests.js');
@@ -19,11 +20,8 @@ const testFileWithSkippedTestPath              = path.resolve('test/server/data/
 const externalModulePath         = path.resolve('test/server/data/test-suites/live/module.js');
 const externalCommonJsModulePath = path.resolve('test/server/data/test-suites/live/commonjs-module.js');
 
-const DOCKER_TESTCAFE_FOLDER_REGEXP = /^\/usr\/lib\/node_modules\/testcafe/;
+const DOCKER_TESTCAFE_FOLDER_REGEXP = /^\/usr\/local\/lib\/node_modules\/testcafe/;
 
-const browserSetMock = {
-    browserConnectionGroups: [],
-};
 
 class FileWatcherMock extends FileWatcher {
     addFile (controller, file) {
@@ -256,9 +254,10 @@ describe('TestCafe Live', function () {
 
     it('rerun and add file', function () {
         return runTests(testFileWithSingleTestPath)
-            .then(() => {
+            .then(async () => {
                 runner.src(testFileWithMultipleTestsPath);
-                return runner._applyOptions();
+                await runner._setConfigurationOptions();
+                await runner._setBootstrapperOptions();
             })
             .then(() => {
                 return runner.controller.restart();
@@ -279,9 +278,11 @@ describe('TestCafe Live', function () {
         expect(errors.length).eql(0);
 
         return runTests(testFileWithSingleTestPath)
-            .then(() => {
+            .then(async () => {
                 runner.src(testFileWithSyntaxErrorPath);
-                return runner._applyOptions();
+
+                await runner._setConfigurationOptions();
+                await runner._setBootstrapperOptions();
             })
             .then(() => {
                 return runner.controller.restart();
@@ -291,16 +292,17 @@ describe('TestCafe Live', function () {
                 expect(errors[0].toString()).contains('Error: Cannot prepare tests due to the following error');
                 expect(runner.runCount).eql(2);
             })
-            .then(() => {
+            .then(async () => {
                 runner.clearSources();
                 runner.src(testFileWithSingleTestPath);
 
-                return runner._applyOptions();
+                await runner._setConfigurationOptions();
+                await runner._setBootstrapperOptions();
             })
             .then(() => {
                 return runner.controller.restart();
             })
-            .then(() => {
+            .then(async () => {
                 expect(runner.runCount).eql(3);
                 expect(errors.length).eql(1);
 
@@ -312,7 +314,8 @@ describe('TestCafe Live', function () {
                 runner.clearSources();
                 runner.src(testFileWithSyntaxErrorPath);
 
-                return runner._applyOptions();
+                await runner._setConfigurationOptions();
+                await runner._setBootstrapperOptions();
             })
             .then(() => {
                 return runner.controller.restart();
@@ -374,7 +377,10 @@ describe('TestCafe Live', function () {
         this.timeout(6000);
 
         runner = new RunnerMock(testCafe, {})
+            .src(testFileWithSingleTestPath)
             .browsers('remote');
+
+        let catched = false;
 
         const promise = runner.run();
 
@@ -382,8 +388,12 @@ describe('TestCafe Live', function () {
             runner.run();
         }
         catch (err) {
+            catched = true;
+
             expect(err.message.indexOf('Cannot launch the same live mode instance of the TestCafe test runner multiple times') > -1).to.be.true;
         }
+
+        expect(catched).eql(true);
 
         return promise;
     });

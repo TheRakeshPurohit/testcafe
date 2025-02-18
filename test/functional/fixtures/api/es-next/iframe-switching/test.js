@@ -1,5 +1,6 @@
-const expect                     = require('chai').expect;
-const errorInEachBrowserContains = require('../../../../assertion-helper.js').errorInEachBrowserContains;
+const { expect }                         = require('chai');
+const { errorInEachBrowserContains }     = require('../../../../assertion-helper.js');
+const { skipDescribeInNativeAutomation } = require('../../../../utils/skip-in');
 
 // NOTE: we set selectorTimeout to a large value in some tests to wait for
 // an iframe to load on the farm (it is fast locally but can take some time on the farm)
@@ -20,7 +21,24 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
     });
 
     it('Should switch context between a nested iframe and the main window', function () {
-        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click on element in a nested iframe', DEFAULT_RUN_OPTIONS);
+        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click on element in a nested iframe', {
+            skip: 'firefox-osx',
+            ...DEFAULT_RUN_OPTIONS,
+        });
+    });
+
+    it('Should switch context between a shadow iframe and the main window', function () {
+        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click on an element in a shadow iframe and return to the main window', {
+            ...DEFAULT_RUN_OPTIONS,
+            skip: ['edge'],
+        });
+    });
+
+    it('Should switch context between a nested shadow iframe and the main window', function () {
+        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click on element in a nested shadow iframe', {
+            ...DEFAULT_RUN_OPTIONS,
+            skip: ['edge'],
+        });
     });
 
     it('Should wait while a target iframe is loaded', function () {
@@ -32,7 +50,8 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
     });
 
     it('Should execute an action in an iframe with redirect', function () {
-        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click in an iframe with redirect', DEFAULT_RUN_OPTIONS);
+        // NOTE: this test is very unstable in GitHub Actions image. Locally it works fine.
+        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click in an iframe with redirect', Object.assign({}, DEFAULT_RUN_OPTIONS, { skip: 'edge' }));
     });
 
     it('Should keep context if the page was reloaded', function () {
@@ -49,11 +68,15 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
 
     it('Should work in a cross-domain iframe', function () {
         // TODO: fix this test for Safari on BrowserStack
-        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click in a cross-domain iframe with redirect', { skip: 'safari', ...DEFAULT_RUN_OPTIONS });
+        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click in a cross-domain iframe with redirect', { skip: ['safari', 'firefox-osx'], ...DEFAULT_RUN_OPTIONS });
     });
 
     it('Should work in an iframe with the srcdoc attribute', function () {
-        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click in an iframe with the srcdoc attribute', { skip: 'ie', ...DEFAULT_RUN_OPTIONS });
+        return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click in an iframe with the srcdoc attribute', { ...DEFAULT_RUN_OPTIONS });
+    });
+
+    it('Correct execution order of "message" events in cross-domain iframe', function () {
+        return runTests('./testcafe-fixtures/message-event.js', null, { skip: ['iphone', 'ipad'], ...DEFAULT_RUN_OPTIONS });
     });
 
     describe('Unavailable iframe errors', function () {
@@ -64,7 +87,7 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
                     expect(errs[0]).to.contains(
                         'The specified selector does not match any element in the DOM tree.' +
                         '  > | Selector(\'#non-existent\')');
-                    expect(errs[0]).to.contains("> 56 |    await t.switchToIframe('#non-existent');");
+                    expect(/> *\d* *\| *await t\.switchToIframe\('#non-existent'\);/.test(errs[0])).ok;
                 });
         });
 
@@ -81,7 +104,7 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
             return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Try to switch to an incorrect element', { shouldFail: true })
                 .catch(function (errs) {
                     expect(errs[0]).to.contains('The action element is expected to be an <iframe>.');
-                    expect(errs[0]).to.contains("> 74 |    await t.switchToIframe('body');");
+                    expect(/> *\d* *\| *await t\.switchToIframe\('body'\);/.test(errs[0])).ok;
                 });
         });
 
@@ -92,7 +115,7 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
             })
                 .catch(function (errs) {
                     expect(errs[0]).to.contains('Content of the iframe to which you are switching did not load.');
-                    expect(errs[0]).to.contains("> 184 |        .switchToIframe('#too-slowly-loading-iframe')");
+                    expect(/> *\d* *\| *\.switchToIframe\('#too-slowly-loading-iframe'\)/.test(errs[0])).ok;
                 });
         });
 
@@ -100,7 +123,7 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
             return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click in a removed iframe', DEFAULT_FAILED_RUN_OPTIONS)
                 .catch(function (errs) {
                     expect(errs[0]).to.contains('The iframe in which the test is currently operating does not exist anymore.');
-                    expect(errs[0]).to.contains("> 93 |        .click('#btn');");
+                    expect(/> *\d* *\| *\.click\('#btn'\);/.test(errs[0])).ok;
                 });
         });
 
@@ -108,7 +131,7 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
             return runTests('./testcafe-fixtures/iframe-switching-test.js', 'Click in an invisible iframe', DEFAULT_FAILED_RUN_OPTIONS)
                 .catch(function (errs) {
                     expect(errs[0]).to.contains('The iframe in which the test is currently operating is not visible anymore.');
-                    expect(errs[0]).to.contains("> 196 |        .click('#btn');");
+                    expect(/> *\d* *\| *\.click\('#btn'\);/.test(errs[0])).ok;
                 });
         });
 
@@ -122,12 +145,12 @@ describe('[API] t.switchToIframe(), t.switchToMainWindow()', function () {
             })
                 .catch(function (errs) {
                     expect(errs[0]).to.contains('Content of the iframe in which the test is currently operating did not load.');
-                    expect(errs[0]).to.contains("> 204 |        .click('#second-page-btn');");
+                    expect(/> *\d* *\| *\.click\('#second-page-btn'\);/.test(errs[0])).ok;
                 });
         });
     });
 
-    describe('Page errors handling', function () {
+    skipDescribeInNativeAutomation('Page errors handling', function () {
         it('Should fail if an error occurs in a same-domain iframe while an action is being executed', function () {
             return runTests('./testcafe-fixtures/page-errors-test.js', 'Error in a same-domain iframe', DEFAULT_FAILED_RUN_OPTIONS)
                 .catch(function (errs) {

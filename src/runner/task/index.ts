@@ -5,7 +5,6 @@ import BrowserJob from '../browser-job';
 import Screenshots from '../../screenshots';
 import WarningLog from '../../notifications/warning-log';
 import FixtureHookController from '../fixture-hook-controller';
-import * as clientScriptsRouting from '../../custom-client-scripts/routing';
 import Videos from '../../video-recorder/videos';
 import TestRun from '../../test-run';
 import { Proxy } from 'testcafe-hammerhead';
@@ -20,7 +19,6 @@ import BrowserConnection from '../../browser/connection';
 import Test from '../../api/structure/test';
 import { VideoOptions } from '../../video-recorder/interfaces';
 import TaskPhase from './phase';
-import CompilerService from '../../services/compiler/host';
 import Fixture from '../../api/structure/fixture';
 import MessageBus from '../../utils/message-bus';
 
@@ -35,11 +33,10 @@ export default class Task extends AsyncEventEmitter {
     public readonly screenshots: Screenshots;
     public readonly fixtureHookController: FixtureHookController;
     private readonly _pendingBrowserJobs: BrowserJob[];
-    private readonly _clientScriptRoutes: string[];
     public readonly testStructure: ReportedTestStructureItem[];
     public readonly videos?: Videos;
-    private readonly _compilerService?: CompilerService;
     private readonly _messageBus: MessageBus;
+    public startTime?: Date;
 
     public constructor ({
         tests,
@@ -47,7 +44,6 @@ export default class Task extends AsyncEventEmitter {
         proxy,
         opts,
         runnerWarningLog,
-        compilerService,
         messageBus,
     }: TaskInit) {
         super({ captureRejections: true });
@@ -59,24 +55,23 @@ export default class Task extends AsyncEventEmitter {
         this.opts                    = opts;
         this._proxy                  = proxy;
         this.warningLog              = new WarningLog(null, WarningLog.createAddWarningCallback(messageBus));
-        this._compilerService        = compilerService;
         this._messageBus             = messageBus;
 
-        runnerWarningLog.copyTo(this.warningLog);
+        this.warningLog.copyFrom(runnerWarningLog);
 
-        const { path, pathPattern, fullPage, thumbnails } = this.opts.screenshots as ScreenshotOptionValue;
+        const { path, pathPattern, pathPatternOnFails, fullPage, thumbnails } = this.opts.screenshots as ScreenshotOptionValue;
 
         this.screenshots = new Screenshots({
             enabled: !this.opts.disableScreenshots,
             path,
             pathPattern,
+            pathPatternOnFails,
             fullPage,
             thumbnails,
         });
 
         this.fixtureHookController = new FixtureHookController(tests, browserConnectionGroups.length);
         this._pendingBrowserJobs   = this._createBrowserJobs(proxy, this.opts);
-        this._clientScriptRoutes   = clientScriptsRouting.register(proxy, tests);
         this.testStructure         = this._prepareTestStructure(tests);
 
         if (this.opts.videoPath) {
@@ -97,9 +92,10 @@ export default class Task extends AsyncEventEmitter {
             }
         });
 
-        job.once('start', async () => {
+        job.once('start', async (startTime: Date) => {
             if (this._phase !== TaskPhase.started) {
-                this._phase = TaskPhase.started;
+                this._phase    = TaskPhase.started;
+                this.startTime = startTime;
 
                 await this._messageBus.emit('start', this);
             }
@@ -130,7 +126,7 @@ export default class Task extends AsyncEventEmitter {
         const groups = groupBy(tests, 'fixture.id');
 
         return Object.keys(groups).map(fixtureId => {
-            const testsByGroup = groups[fixtureId];
+            const testsByGroup = groups[fixtureId] as Test[];
             const fixture      = testsByGroup[0].fixture as Fixture;
 
             return {
@@ -157,7 +153,6 @@ export default class Task extends AsyncEventEmitter {
                 screenshots:           this.screenshots,
                 warningLog:            this.warningLog,
                 fixtureHookController: this.fixtureHookController,
-                compilerService:       this._compilerService,
                 messageBus:            this._messageBus,
                 proxy,
                 opts,
@@ -168,10 +163,6 @@ export default class Task extends AsyncEventEmitter {
 
             return job;
         });
-    }
-
-    public unRegisterClientScriptRouting (): void {
-        clientScriptsRouting.unRegister(this._proxy, this._clientScriptRoutes);
     }
 
     // API

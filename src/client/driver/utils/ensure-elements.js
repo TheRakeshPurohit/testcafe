@@ -1,6 +1,8 @@
 import { Promise, nativeMethods } from '../deps/hammerhead';
 
-import { domUtils, NODE_TYPE_DESCRIPTIONS } from '../deps/testcafe-core';
+import { domUtils } from '../deps/testcafe-core';
+
+import NODE_TYPE_DESCRIPTIONS from '../node-type-descriptions';
 
 import SelectorExecutor from '../command-executors/client-functions/selector-executor';
 
@@ -57,7 +59,7 @@ export function createElementDescriptor (selector) {
     return {
         selector:                    selector,
         createNotFoundError:         fn => new ActionElementNotFoundError(null, fn),
-        createIsInvisibleError:      () => new ActionElementIsInvisibleError(),
+        createIsInvisibleError:      fn => new ActionElementIsInvisibleError(null, fn),
         createHasWrongNodeTypeError: nodeDescription => new ActionSelectorMatchesWrongNodeTypeError(nodeDescription),
     };
 }

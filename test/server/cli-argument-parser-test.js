@@ -1,11 +1,14 @@
-const { expect }        = require('chai');
-const path              = require('path');
-const fs                = require('fs');
-const tmp               = require('tmp');
-const { find }          = require('lodash');
-const CliArgumentParser = require('../../lib/cli/argument-parser');
-const nanoid            = require('nanoid');
-const runOptionNames    = require('../../lib/configuration/run-option-names');
+const { expect }                  = require('chai');
+const path                        = require('path');
+const fs                          = require('fs');
+const tmp                         = require('tmp');
+const { find }                    = require('lodash');
+const CliArgumentParser           = require('../../lib/cli/argument-parser');
+const { nanoid }                  = require('nanoid');
+const runOptionNames              = require('../../lib/configuration/run-option-names');
+const shouldMoveOptionToEnd       = require('../../lib/cli/utils/should-move-option-to-end');
+const QUARANTINE_OPTION_NAMES     = require('../../lib/configuration/quarantine-option-names');
+const { SKIP_JS_ERRORS_OPTIONS_OBJECT_OPTION_NAMES } = require('../../lib/configuration/skip-js-errors-option-names');
 
 describe('CLI argument parser', function () {
     this.timeout(10000);
@@ -15,7 +18,7 @@ describe('CLI argument parser', function () {
     function parse (args, cwd) {
         const parser = new CliArgumentParser(cwd);
 
-        args = ['node', 'index.js'].concat(typeof args === 'string' ? args.split(/\s+/) : args);
+        args = ['node', 'testcafe'].concat(typeof args === 'string' ? args.split(/\s+/) : args);
 
         return parser.parse(args)
             .then(function () {
@@ -69,32 +72,32 @@ describe('CLI argument parser', function () {
 
     describe('Browser list', function () {
         it('Should be parsed as array of aliases or paths', function () {
-            return parse('path:"/Applications/Firefox.app",ie,chrome,firefox,')
+            return parse('path:"/Applications/Firefox.app",edge,chrome,firefox,')
                 .then(function (parser) {
-                    expect(parser.opts.browsers).eql(['path:/Applications/Firefox.app', 'ie', 'chrome', 'firefox']);
+                    expect(parser.opts.browsers).eql(['path:/Applications/Firefox.app', 'edge', 'chrome', 'firefox']);
                 });
         });
 
         it('Should accept "remote" alias', function () {
-            return parse('remote:12,ie,remote,chrome,remote:3')
+            return parse('remote:12,edge,remote,chrome,remote:3')
                 .then(function (parser) {
-                    expect(parser.opts.browsers).eql(['ie', 'chrome']);
+                    expect(parser.opts.browsers).eql(['edge', 'chrome']);
                     expect(parser.remoteCount).eql(16);
                 });
         });
 
         it('Should accept "all" alias', function () {
-            return parse('ie,chrome,all')
+            return parse('edge,chrome,all')
                 .then(function (parser) {
-                    expect(parser.opts.browsers).eql(['ie', 'chrome', 'all']);
+                    expect(parser.opts.browsers).eql(['edge', 'chrome', 'all']);
                 });
         });
 
         it('Should split browsers correctly if paths have commas and quotes', function () {
-            return parse('path:"/Apps,Libs/\'Firefox.app",ie,chrome,firefox,path:\'/Apps,Libs/"Chrome.app\'')
+            return parse('path:"/Apps,Libs/\'Firefox.app",edge,chrome,firefox,path:\'/Apps,Libs/"Chrome.app\'')
                 .then(function (parser) {
                     expect(parser.opts.browsers).eql([
-                        'path:/Apps,Libs/\'Firefox.app', 'ie', 'chrome', 'firefox',
+                        'path:/Apps,Libs/\'Firefox.app', 'edge', 'chrome', 'firefox',
                         'path:/Apps,Libs/"Chrome.app',
                     ]);
                 });
@@ -124,7 +127,7 @@ describe('CLI argument parser', function () {
         });
 
         it('Should raise error if "--ports" option has less than 2 ports specified', function () {
-            return assertRaisesError('--ports 1337', 'The "--ports" argument accepts two values at a time.');
+            return assertRaisesError('--ports 1337', 'The "--ports" option requires two arguments.');
         });
     });
 
@@ -203,6 +206,32 @@ describe('CLI argument parser', function () {
 
         it('Should raise an error if the "--browser-init-timeout" option value is not an integer', function () {
             return assertRaisesError('--browser-init-timeout yo', 'The browser initialization timeout ("yo") is not of expected type (non-negative number).');
+        });
+    });
+
+    describe('Test execution timeout', function () {
+        it('Should parse "--test-execution-timeout" option as integer value', function () {
+            return parse('--test-execution-timeout 1000')
+                .then(function (parser) {
+                    expect(parser.opts.testExecutionTimeout).eql(1000);
+                });
+        });
+
+        it('Should raise an error if the "--test-execution-timeout" option value is not an integer', function () {
+            return assertRaisesError('--test-execution-timeout yo', 'The test execution timeout ("yo") is not of expected type (non-negative number).');
+        });
+    });
+
+    describe('Run execution timeout', function () {
+        it('Should parse "--run-execution-timeout" option as integer value', function () {
+            return parse('--run-execution-timeout 1000')
+                .then(function (parser) {
+                    expect(parser.opts.runExecutionTimeout).eql(1000);
+                });
+        });
+
+        it('Should raise an error if the "--run-execution-timeout" option value is not an integer', function () {
+            return assertRaisesError('--run-execution-timeout yo', 'The run execution timeout ("yo") is not of expected type (non-negative number).');
         });
     });
 
@@ -653,6 +682,33 @@ describe('CLI argument parser', function () {
             });
     });
 
+    it('Should parse bool false value for booleanOrObject options', async () => {
+        async function checkCliArgs (argsString) {
+            const parser = await parse(argsString);
+
+            expect(parser.opts.quarantineMode).equal(false);
+            expect(parser.opts.skipJsErrors).equal(false);
+        }
+
+        await checkCliArgs('chrome -q false test.js -e false');
+    });
+
+    it('Should move booleanOrObject option to the end in no value provided', async () => {
+        const quarantineOptions   = Object.values(QUARANTINE_OPTION_NAMES);
+        const skipJsErrorsOptions = Object.values(SKIP_JS_ERRORS_OPTIONS_OBJECT_OPTION_NAMES);
+
+        function checkOption (args, optionName, subOptions) {
+            const optionIndex = args.indexOf(optionName);
+
+            return shouldMoveOptionToEnd(args, optionIndex, subOptions);
+        }
+
+        expect(checkOption(['-q', 'attemptLimit=5', 'chrome'], '-q', quarantineOptions)).eql(false);
+        expect(checkOption(['-e', 'message=test', 'chrome'], '-e', skipJsErrorsOptions)).eql(false);
+        expect(checkOption(['-q', 'chrome', 'test.js'], '-q', quarantineOptions)).eql(true);
+        expect(checkOption(['-e', 'chrome', 'test.js'], '-e', skipJsErrorsOptions)).eql(true);
+    });
+
     describe('Quarantine Option', function () {
         it('Should parse quarantine arguments', async () => {
             async function checkCliArgs (argsString) {
@@ -727,9 +783,9 @@ describe('CLI argument parser', function () {
     });
 
     it('Should parse command line arguments', function () {
-        return parse('-r list -S -q -e --hostname myhost --proxy localhost:1234 --proxy-bypass localhost:5678 --qr-code --app run-app --speed 0.5 --debug-on-fail --disable-page-reloads --retry-test-pages --dev --sf --disable-page-caching --disable-http2 --proxyless ie test/server/data/file-list/file-1.js')
+        return parse('-r list -S -q -e message=/testMessage/i,stack=testStack,pageUrl=testPageUrl --hostname myhost --base-url localhost:3000 --proxy localhost:1234 --proxy-bypass localhost:5678 --qr-code --app run-app --speed 0.5 --debug-on-fail --disable-page-reloads --retry-test-pages --dev --sf --disable-page-caching --disable-http2 --disable-native-automation --disable-cross-domain edge test/server/data/file-list/file-1.js')
             .then(parser => {
-                expect(parser.opts.browsers).eql(['ie']);
+                expect(parser.opts.browsers).eql(['edge']);
                 expect(parser.opts.src).eql(['test/server/data/file-list/file-1.js']);
                 expect(parser.opts.reporter[0].name).eql('list');
                 expect(parser.opts.hostname).eql('myhost');
@@ -739,7 +795,9 @@ describe('CLI argument parser', function () {
                 expect(parser.opts.screenshots.fullPage).to.be.undefined;
                 expect(parser.opts.screenshots.pathPattern).to.be.undefined;
                 expect(parser.opts.quarantineMode).to.be.ok;
-                expect(parser.opts.skipJsErrors).to.be.ok;
+                expect(parser.opts.skipJsErrors.message).eql('/testMessage/i');
+                expect(parser.opts.skipJsErrors.stack).eql('testStack');
+                expect(parser.opts.skipJsErrors.pageUrl).eql('testPageUrl');
                 expect(parser.opts.dev).to.be.ok;
                 expect(parser.opts.speed).eql(0.5);
                 expect(parser.opts.qrCode).to.be.ok;
@@ -751,7 +809,9 @@ describe('CLI argument parser', function () {
                 expect(parser.opts.disablePageReloads).to.be.ok;
                 expect(parser.opts.retryTestPages).to.be.ok;
                 expect(parser.opts.disableHttp2).to.be.ok;
-                expect(parser.opts.proxyless).to.be.ok;
+                expect(parser.opts.disableCrossDomain).to.be.ok;
+                expect(parser.opts.disableNativeAutomation).to.be.ok;
+                expect(parser.opts.baseUrl).eql('localhost:3000');
             });
     });
 
@@ -764,7 +824,7 @@ describe('CLI argument parser', function () {
             });
     });
 
-    it('Should have static CLI', () => {
+    it('Should have static CLI for the main command', () => {
         const CHANGE_CLI_WARNING         = 'IMPORTANT: Please be sure what you want to change CLI if this test is failing!';
         const ADD_TO_RUN_OPTIONS_WARNING = 'Check that the added option is correctly passed from the command-line interface to the run options.' +
                                            'If the new option is not a run option just increase the "expectedOtherOptionsCount" value';
@@ -794,6 +854,8 @@ describe('CLI argument parser', function () {
             { long: '--assertion-timeout' },
             { long: '--page-load-timeout' },
             { long: '--browser-init-timeout' },
+            { long: '--test-execution-timeout' },
+            { long: '--run-execution-timeout' },
             { long: '--speed' },
             { long: '--ports' },
             { long: '--hostname' },
@@ -818,17 +880,20 @@ describe('CLI argument parser', function () {
             { long: '--disable-screenshots' },
             { long: '--screenshots-full-page' },
             { long: '--disable-multiple-windows' },
-            { long: '--experimental-debug' },
             { long: '--compiler-options' },
             { long: '--page-request-timeout' },
             { long: '--ajax-request-timeout' },
             { long: '--cache' },
             { long: '--disable-http2' },
-            { long: '--proxyless' },
+            { long: '--disable-native-automation' },
+            { long: '--base-url' },
+            { long: '--disable-cross-domain' },
+            { long: '--esm' },
+            { long: '--experimental-multiple-windows' },
         ];
 
         const parser  = new CliArgumentParser('');
-        const options = parser.program.options;
+        const options = parser.testCafeCommand.options;
 
         expect(options.length).eql(EXPECTED_OPTIONS.length, CHANGE_CLI_WARNING);
 
@@ -840,8 +905,8 @@ describe('CLI argument parser', function () {
             expect(option.short).eql(EXPECTED_OPTIONS[i].short, CHANGE_CLI_WARNING);
         }
 
-        const expectedRunOptionsCount   = 19;
-        const expectedOtherOptionsCount = 36;
+        const expectedRunOptionsCount   = 23;
+        const expectedOtherOptionsCount = 37;
         const otherOptionsCount         = options.length - expectedRunOptionsCount;
 
         expect(runOptionNames.length).eql(expectedRunOptionsCount, ADD_TO_RUN_OPTIONS_WARNING);
@@ -849,7 +914,7 @@ describe('CLI argument parser', function () {
     });
 
     it('Run options', () => {
-        const argumentsString = 'ie,chrome test.js' + [
+        const argumentsString = 'edge,chrome test.js' + [
             '--debug-on-fail',
             '--skip-js-errors',
             '--skip-uncaught-errors',
@@ -860,12 +925,15 @@ describe('CLI argument parser', function () {
             '--assertion-timeout 1000',
             '--page-load-timeout 1000',
             '--browser-init-timeout 1000',
+            '--test-execution-timeout 1000',
+            '--run-execution-timeout 1000',
             '--speed 1',
             '--stop-on-first-fail',
             '--disable-page-caching',
             '--disable-page-reloads',
             '--disable-screenshots',
             '--disable-multiple-windows',
+            '--base-url localhost:3000',
         ].join(' ');
 
         return parse(argumentsString)
@@ -881,6 +949,8 @@ describe('CLI argument parser', function () {
                 expect(runOpts.assertionTimeout).eql(1000);
                 expect(runOpts.pageLoadTimeout).eql(1000);
                 expect(runOpts.browserInitTimeout).eql(1000);
+                expect(runOpts.testExecutionTimeout).eql(1000);
+                expect(runOpts.runExecutionTimeout).eql(1000);
                 expect(runOpts.speed).eql(1);
                 expect(runOpts.stopOnFirstFail).eql(true);
                 expect(runOpts.disablePageCaching).eql(true);
@@ -888,6 +958,7 @@ describe('CLI argument parser', function () {
                 expect(runOpts.disableScreenshots).eql(true);
                 expect(runOpts.disableMultipleWindows).eql(true);
                 expect(runOpts.browsers).to.be.undefined;
+                expect(runOpts.baseUrl).eql('localhost:3000');
             });
     });
 });

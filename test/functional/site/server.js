@@ -1,13 +1,14 @@
 const express               = require('express');
 const http                  = require('http');
 const path                  = require('path');
+const cors                  = require('cors');
 const bodyParser            = require('body-parser');
 const { readSync }          = require('read-file-relative');
 const multer                = require('multer');
 const Mustache              = require('mustache');
 const { readFile }          = require('../../../lib/utils/promisified-functions');
 const quarantineModeTracker = require('../quarantine-mode-tracker');
-const parseUserAgent        = require('../../../lib/utils/parse-user-agent');
+const { parseUserAgent }    = require('../../../lib/utils/parse-user-agent');
 
 const storage = multer.memoryStorage();
 const upload  = multer({ storage: storage });
@@ -35,7 +36,7 @@ const shouldCachePage = function (reqUrl) {
     return NON_CACHEABLE_PAGES.every(pagePrefix => !reqUrl.startsWith(pagePrefix));
 };
 
-const Server = module.exports = function (port, basePath) {
+const Server = module.exports = function (port, basePath, apiRouter) {
     const server = this;
 
     this.app       = express().use(bodyParser.urlencoded({ extended: false }));
@@ -43,7 +44,11 @@ const Server = module.exports = function (port, basePath) {
     this.sockets   = [];
     this.basePath  = basePath;
 
-    this._setupRoutes();
+    this.app.use(cors());
+
+    this.app.use(bodyParser.json());
+
+    this._setupRoutes(apiRouter);
 
     const handler = function (socket) {
         server.sockets.push(socket);
@@ -55,8 +60,10 @@ const Server = module.exports = function (port, basePath) {
     this.appServer.on('connection', handler);
 };
 
-Server.prototype._setupRoutes = function () {
+Server.prototype._setupRoutes = function (apiRouter) {
     const server = this;
+
+    this.app.use('/api', apiRouter);
 
     this.app.get('/download', function (req, res) {
         const filePath = path.join(server.basePath, '../../package.json');
@@ -68,6 +75,10 @@ Server.prototype._setupRoutes = function () {
         const parsedUA = parseUserAgent(req.headers['user-agent']);
 
         res.end(parsedUA.name);
+    });
+
+    this.app.get('/trim-bom', (req, res) => {
+        res.send(`${String.fromCharCode(65279)}<html><head><meta charset="utf-8"></head><body><button>click me</button></body></html>`);
     });
 
     this.app.get('/i4855', (req, res) => {
@@ -94,6 +105,68 @@ Server.prototype._setupRoutes = function () {
                 </body>
             </html>
         `);
+    });
+
+    this.app.get('/redirect', (req, res) => {
+        res.redirect(req.query.page);
+    });
+
+    this.app.get('/fixtures/request-pipeline/content-security-policy/pages/csp.html', (req, res, next) => {
+        res.setHeader('Content-Security-Policy', 'script-src \'self\'');
+
+        next();
+    });
+
+    this.app.get('/204', function (req, res) {
+        res.status(204);
+        res.end();
+    });
+
+    this.app.get('/fixtures/regression/gh-7874/', (req, res) => {
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>GH-7874</title>
+            </head>
+            <body>
+            <button onclick="btnClick()">Set Cookie</button>
+            <script>
+                function btnClick () {
+                    document.cookie = 'inPage=val;' + document.cookie;
+            
+                    fetch('http://localhost:3000/get-browser-name', {
+                        credentials: 'include'
+                    })
+                        .then(() => {
+                            console.log('finished');
+                        })
+                }
+            </script>
+            </body>
+            </html>
+        `);
+    });
+
+    this.app.get('/fixtures/regression/gh-7529/', function (req, res) {
+        const html = `
+            <!DOCTYPE html>
+            <html lang="fr">
+            <head>
+                <meta charset="ISO-8859-15">
+                <title>GH-7529</title>
+            </head>
+            <body>
+            <h1>codage réussi</h1>
+            </body>
+            </html>
+        `;
+
+        const content = Buffer.from(html, 'latin1');
+
+        res.setHeader('content-type', 'text/html; charset=iso-8859-15');
+        res.send(content);
     });
 
     this.app.get('*', function (req, res) {
@@ -157,6 +230,23 @@ Server.prototype._setupRoutes = function () {
         res.end(Mustache.render(UPLOAD_SUCCESS_PAGE_TEMPLATE, { uploadedDataArray: filesData }));
     });
 
+    this.app.post('/file-upload-size', upload.any(), function (req, res) {
+        const filesData = req.files.map(function (file) {
+            return file.size;
+        });
+
+        res.end(`${filesData[0]}`);
+    });
+
+    this.app.post('/xhr/test-header', function (req, res) {
+        res.send(req.headers.test);
+    });
+
+    this.app.post('/xhr/auth-header', function (req, res) {
+        res.setHeader('authorization', 'authorization-string');
+        res.send();
+    });
+
     this.app.post('/xhr/:delay', function (req, res) {
         const delay = req.params.delay || 0;
 
@@ -172,6 +262,10 @@ Server.prototype._setupRoutes = function () {
         });
 
         res.end();
+    });
+
+    this.app.options('/options', function (req, res) {
+        res.send();
     });
 };
 

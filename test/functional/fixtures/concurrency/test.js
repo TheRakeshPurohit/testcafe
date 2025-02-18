@@ -1,9 +1,10 @@
-const path               = require('path');
-const { expect }         = require('chai');
-const isCI               = require('is-ci');
-const config             = require('../../config');
-const { createReporter } = require('../../utils/reporter');
-const timeline           = require('./timeline');
+const path                       = require('path');
+const { expect }                 = require('chai');
+const isCI                       = require('is-ci');
+const config                     = require('../../config');
+const { createReporter }         = require('../../utils/reporter');
+const testInfo                   = require('./test-info');
+const { skipInNativeAutomation } = require('../../utils/skip-in');
 
 
 if (config.useLocalBrowsers) {
@@ -14,7 +15,7 @@ if (config.useLocalBrowsers) {
             return path.join(__dirname, file);
         }
 
-        function run (browsers, concurrency, files, reporter) {
+        function run (browsers, concurrency, files, reporter, hooks) {
             let src = null;
 
             reporter = reporter || 'json';
@@ -34,14 +35,16 @@ if (config.useLocalBrowsers) {
                     write: function (newData) {
                         data += newData;
                     },
-
                     end: function (newData) {
                         data += newData;
                     },
                 })
                 .browsers(browsers)
                 .concurrency(concurrency)
-                .run();
+                .run({
+                    disableNativeAutomation: !config.nativeAutomation,
+                    hooks,
+                });
         }
 
         function createConnections (count) {
@@ -53,6 +56,7 @@ if (config.useLocalBrowsers) {
 
             function addConnection (connection) {
                 connections.push(connection);
+
                 return connections;
             }
 
@@ -77,25 +81,64 @@ if (config.useLocalBrowsers) {
             },
         });
 
+        const slowReporter = createReporter({
+            reportTaskStart: async function () {
+                await new Promise(resolve => setTimeout(() => resolve(), 100));
+                this.write('Task start').newline();
+            },
+
+            reportTestStart: async function () {
+                this.write('Test start').newline();
+            },
+        });
+
         beforeEach(function () {
             data = '';
         });
 
         afterEach(() => {
-            timeline.delete();
+            testInfo.delete();
         });
 
         it('Should run tests sequentially if concurrency = 1', function () {
             return run('chrome:headless --no-sandbox', 1, './testcafe-fixtures/sequential-test.js')
                 .then(() => {
-                    expect(timeline.getData()).eql(['long started', 'long finished', 'short started', 'short finished']);
+                    expect(testInfo.getData()).eql(['long started', 'long finished', 'short started', 'short finished']);
                 });
         });
 
         it('Should run tests concurrently if concurrency > 1', function () {
             return run('chrome:headless --no-sandbox', 2, './testcafe-fixtures/concurrent-test.js')
                 .then(() => {
-                    expect(timeline.getData()).eql(['test started', 'test started', 'short finished', 'long finished']);
+                    expect(testInfo.getData()).eql(['test started', 'test started', 'short finished', 'long finished']);
+                });
+        });
+
+        it('Should run tests concurrently after fixture before hook', function () {
+            return run('chrome:headless --no-sandbox', 5, './testcafe-fixtures/concurrent-fixture-before-test.js', 'json', {
+                testRun: {
+                    before: async () => {
+                        await new Promise(r => setTimeout(r, 3000));
+                    },
+                },
+            })
+                .then(failedCount => {
+                    expect(failedCount).eql(0);
+                });
+        });
+
+        it('Report TaskStart event handler should contain links to all opened browsers', async () => {
+            const concurrency = 2;
+            const scope       = {};
+            const reporter    = createReporter({
+                reportTaskStart: (_, userAgents) => {
+                    scope.userAgents = userAgents;
+                },
+            });
+
+            return run('chrome:headless', concurrency, './testcafe-fixtures/concurrent-test.js', reporter)
+                .then(() => {
+                    expect(scope.userAgents.length).eql(concurrency);
                 });
         });
 
@@ -104,7 +147,7 @@ if (config.useLocalBrowsers) {
             it('Should run tests concurrently in different browser kinds', function () {
                 return run(['chrome:headless --no-sandbox', 'chrome:headless --no-sandbox --user-agent="TestAgent"'], 2, './testcafe-fixtures/multibrowser-concurrent-test.js')
                     .then(() => {
-                        const timelineData = timeline.getData();
+                        const timelineData = testInfo.getData();
 
                         expect(Object.keys(timelineData).length).gt(1);
 
@@ -113,6 +156,17 @@ if (config.useLocalBrowsers) {
                     });
             });
         }
+
+        // TODO: stabilize test on Firefox
+        // NOTE: Skip the test for nativeAutomation mode
+        const needSkip = config.hasBrowser('firefox') || config.nativeAutomation;
+
+        (needSkip ? it.skip : it)('Should run tests concurrently with Role', function () {
+            return run('chrome:headless --no-sandbox', 2, './testcafe-fixtures/role-test.js')
+                .then(() => {
+                    expect(testInfo.getData()).eql(['/fixtures/concurrency/pages/first-page.html', '/fixtures/concurrency/pages/second-page.html']);
+                });
+        });
 
         it('Should report fixture start correctly if second fixture finishes before first', function () {
             return run('chrome:headless --no-sandbox', 2, ['./testcafe-fixtures/multifixture-test-a.js', './testcafe-fixtures/multifixture-test-b.js'], customReporter)
@@ -128,7 +182,21 @@ if (config.useLocalBrowsers) {
                 });
         });
 
-        it('Should fail if number of remotes is not divisible by concurrency', function () {
+        it('Should not start any test before report task start finishes', function () {
+            return run('chrome:headless --no-sandbox', 2, './testcafe-fixtures/concurrent-test.js', slowReporter)
+                .then(failedCount => {
+                    expect(failedCount).eql(0);
+                    expect(data.split('\n')).eql([
+                        'Task start',
+                        'Test start',
+                        'Test start',
+                        '',
+                    ]);
+                });
+        });
+
+        // NOTE: the 'remote' connection cannot be nativeAutomation.
+        skipInNativeAutomation('Should fail if number of remotes is not divisible by concurrency', function () {
             return createConnections(3)
                 .then(function (connections) {
                     return run(connections, 2, './testcafe-fixtures/concurrent-test.js');
@@ -138,6 +206,29 @@ if (config.useLocalBrowsers) {
                 })
                 .catch(function (error) {
                     expect(error.message).eql('The number of remote browsers should be divisible by the concurrency factor.');
+                });
+        });
+
+        it('Should display correct duration for the tests run in concurrency', function () {
+            const durationsInfo = [];
+
+            const durationReporter = createReporter({
+                reportTestDone: function (name, { durationMs }) {
+                    durationsInfo.push({ name, durationMs });
+                },
+            });
+
+            return run('chrome:headless --no-sandbox', 3, './testcafe-fixtures/duration-test.js', durationReporter)
+                .then(() => {
+                    const sortedByDuration = durationsInfo
+                        .sort((info1, info2) => info1.durationMs - info2.durationMs)
+                        .map(info => info.name);
+
+                    expect(sortedByDuration).eql([
+                        'Test 2',
+                        'Test 1',
+                        'Test 3',
+                    ]);
                 });
         });
     });

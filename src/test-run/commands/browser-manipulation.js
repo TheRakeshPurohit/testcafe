@@ -9,6 +9,7 @@ import {
     screenshotPathArgument,
     resizeWindowDeviceArgument,
     actionOptions,
+    stringArgument,
 } from './validations/argument';
 
 import { generateScreenshotMark } from '../../screenshots/utils';
@@ -43,9 +44,10 @@ export class TakeScreenshotCommand extends TakeScreenshotBaseCommand {
         super(obj, testRun, TYPE.takeScreenshot, validateProperties);
     }
 
-    _getAssignableProperties () {
+    getAssignableProperties () {
         return [
             { name: 'path', type: screenshotPathArgument, defaultValue: '' },
+            { name: 'pathPattern', type: stringArgument, defaultValue: '' },
             { name: 'fullPage', type: booleanArgument, defaultValue: void 0 },
             { name: 'thumbnails', type: booleanArgument, defaultValue: void 0 },
         ];
@@ -59,7 +61,7 @@ export class TakeElementScreenshotCommand extends TakeScreenshotBaseCommand {
         super(obj, testRun, TYPE.takeElementScreenshot, validateProperties);
     }
 
-    _getAssignableProperties () {
+    getAssignableProperties () {
         return [
             { name: 'selector', init: initSelector, required: true },
             { name: 'options', init: initElementScreenshotOptions, required: true },
@@ -75,9 +77,10 @@ export class TakeScreenshotOnFailCommand extends TakeScreenshotBaseCommand {
         super(obj, testRun, TYPE.takeScreenshotOnFail);
     }
 
-    _getAssignableProperties () {
+    getAssignableProperties () {
         return [
             { name: 'fullPage', type: booleanArgument, defaultValue: false },
+            { name: 'failedActionId', type: stringArgument },
         ];
     }
 }
@@ -89,7 +92,7 @@ export class ResizeWindowCommand extends ActionCommandBase {
         super(obj, testRun, TYPE.resizeWindow);
     }
 
-    _getAssignableProperties () {
+    getAssignableProperties () {
         return [
             { name: 'width', type: positiveIntegerArgument, required: true },
             { name: 'height', type: positiveIntegerArgument, required: true },
@@ -104,7 +107,7 @@ export class ResizeWindowToFitDeviceCommand extends ActionCommandBase {
         super(obj, testRun, TYPE.resizeWindowToFitDevice, validateProperties);
     }
 
-    _getAssignableProperties () {
+    getAssignableProperties () {
         return [
             { name: 'device', type: resizeWindowDeviceArgument, required: true },
             { name: 'options', type: actionOptions, init: initResizeToFitDeviceOptions, required: true },

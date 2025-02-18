@@ -10,6 +10,8 @@ export default [
     OPTION_NAMES.assertionTimeout,
     OPTION_NAMES.pageLoadTimeout,
     OPTION_NAMES.browserInitTimeout,
+    OPTION_NAMES.testExecutionTimeout,
+    OPTION_NAMES.runExecutionTimeout,
     OPTION_NAMES.speed,
     OPTION_NAMES.stopOnFirstFail,
     OPTION_NAMES.disablePageCaching,
@@ -19,5 +21,7 @@ export default [
     OPTION_NAMES.pageRequestTimeout,
     OPTION_NAMES.ajaxRequestTimeout,
     OPTION_NAMES.retryTestPages,
-    OPTION_NAMES.proxyless,
+    OPTION_NAMES.disableNativeAutomation,
+    OPTION_NAMES.experimentalMultipleWindows,
+    OPTION_NAMES.baseUrl,
 ];

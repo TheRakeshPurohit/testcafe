@@ -55,10 +55,10 @@ const SPECIAL_KEYS = {
 };
 
 const KEY_PROPERTY = {
-    left:      browserUtils.isIE ? 'Left' : 'ArrowLeft',
-    down:      browserUtils.isIE ? 'Down' : 'ArrowDown',
-    right:     browserUtils.isIE ? 'Right' : 'ArrowRight',
-    up:        browserUtils.isIE ? 'Up' : 'ArrowUp',
+    left:      'ArrowLeft',
+    down:      'ArrowDown',
+    right:     'ArrowRight',
+    up:        'ArrowUp',
     backspace: 'Backspace',
     capslock:  'CapsLock',
     delete:    'Delete',
@@ -69,13 +69,19 @@ const KEY_PROPERTY = {
     ins:       'Insert',
     pagedown:  'PageDown',
     pageup:    'PageUp',
-    space:     browserUtils.isIE ? 'Spacebar' : ' ',
+    space:     ' ',
     tab:       'Tab',
     alt:       'Alt',
     ctrl:      'Control',
     meta:      'Meta',
     shift:     'Shift',
 };
+
+const NEW_LINE_KEYS = [
+    'enter',
+    '\n',
+    '\r',
+];
 
 function reverseMap (map) {
     const reversed = {};
@@ -152,4 +158,6 @@ export default {
     reversedSpecialKeys: reverseMap(SPECIAL_KEYS),
 
     reversedKeyProperty: reverseMap(KEY_PROPERTY),
+
+    newLineKeys: NEW_LINE_KEYS,
 };

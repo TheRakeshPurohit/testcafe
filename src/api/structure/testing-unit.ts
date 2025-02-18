@@ -1,6 +1,9 @@
-import { pathToFileURL } from 'url';
 import BaseUnit from './base-unit';
-import { assertPageUrl, getUrl } from '../test-page-url';
+import {
+    assertPageUrl,
+    getUrl,
+    prepareBaseUrl,
+} from '../test-page-url';
 import handleTagArgs from '../../utils/handle-tag-args';
 import { delegateAPI, getDelegatedAPIList } from '../../utils/delegated-api';
 import { assertType, is } from '../../errors/runtime/type-assertions';
@@ -10,13 +13,20 @@ import UnitType from './unit-type';
 import RequestHook from '../request-hooks/hook';
 import ClientScriptInit from '../../custom-client-scripts/client-script-init';
 import TestFile from './test-file';
-import { AuthCredentials, Metadata } from './interfaces';
-import { Dictionary } from '../../configuration/interfaces';
+import { AuthCredentials } from './interfaces';
+import {
+    Dictionary, SkipJsErrorsCallback, SkipJsErrorsCallbackWithOptionsObject,
+} from '../../configuration/interfaces';
+import { dirname } from 'path';
+import { validateSkipJsErrorsOptionValue } from '../../utils/get-options/skip-js-errors';
+import { SkipJsErrorsArgumentApiError } from '../../errors/runtime';
 
 export default abstract class TestingUnit extends BaseUnit {
     public readonly testFile: TestFile;
     public name: string | null;
+    public disableConcurrency: boolean;
     public pageUrl: string;
+    public baseUrl: string | undefined;
     public authCredentials: null | AuthCredentials;
     public meta: Metadata;
     public only: boolean;
@@ -27,20 +37,23 @@ export default abstract class TestingUnit extends BaseUnit {
     public disablePageCaching: boolean;
     public apiMethodWasCalled: FlagList;
     public apiOrigin: Function;
+    public skipJsErrorsOptions?: boolean | SkipJsErrorsOptionsObject | SkipJsErrorsCallback| SkipJsErrorsCallbackWithOptionsObject;
 
-    protected constructor (testFile: TestFile, unitType: UnitType, pageUrl: string) {
+    protected constructor (testFile: TestFile, unitType: UnitType, pageUrl: string, baseUrl?: string) {
         super(unitType);
 
         this.testFile = testFile;
 
-        this.name            = null;
-        this.pageUrl         = pageUrl;
-        this.authCredentials = null;
-        this.meta            = {};
-        this.only            = false;
-        this.skip            = false;
-        this.requestHooks    = [];
-        this.clientScripts   = [];
+        this.name               = null;
+        this.pageUrl            = pageUrl;
+        this.baseUrl            = baseUrl;
+        this.authCredentials    = null;
+        this.meta               = {};
+        this.only               = false;
+        this.skip               = false;
+        this.disableConcurrency = false;
+        this.requestHooks       = [];
+        this.clientScripts      = [];
 
         this.disablePageReloads = void 0;
         this.disablePageCaching = false;
@@ -85,11 +98,25 @@ export default abstract class TestingUnit extends BaseUnit {
 
     private _page$ (url: string, ...rest: unknown[]): Function {
         this.pageUrl = handleTagArgs(url, rest);
+        this.baseUrl = this.baseUrl || dirname(this.testFile.filename);
+
+        const base = prepareBaseUrl(this.baseUrl);
 
         assertType(is.string, 'page', 'The page URL', this.pageUrl);
         assertPageUrl(this.pageUrl, 'page');
 
-        this.pageUrl = getUrl(this.pageUrl, pathToFileURL(this.testFile.filename));
+        this.pageUrl = getUrl(this.pageUrl, base);
+
+        return this.apiOrigin;
+    }
+
+
+    private _skipJsErrors$ (options: boolean | SkipJsErrorsOptionsObject | SkipJsErrorsCallback | SkipJsErrorsCallbackWithOptionsObject = true): Function {
+        assertType([ is.boolean, is.nonNullObject, is.function ], 'skipJsErrors', 'The skipJsErrors options argument', options);
+
+        this.skipJsErrorsOptions = options;
+
+        validateSkipJsErrorsOptionValue(this.skipJsErrorsOptions, SkipJsErrorsArgumentApiError);
 
         return this.apiOrigin;
     }
@@ -130,6 +157,25 @@ export default abstract class TestingUnit extends BaseUnit {
     public static makeAPIListForChildClass (ChildClass: unknown): void {
         //@ts-ignore
         ChildClass.API_LIST = TestingUnit.API_LIST.concat(getDelegatedAPIList(ChildClass.prototype));
+    }
+
+    public static init (ChildClass: unknown, ...initProps: unknown[]): TestingUnit {
+        const fn = (...args: unknown[]) : unknown => {
+            //@ts-ignore
+            const apiOrigin = new ChildClass(...initProps) as unknown as Function;
+
+            return apiOrigin(...args);
+        };
+
+        const getHandler = (): unknown => {
+            //@ts-ignore
+            return new ChildClass(...initProps, false);
+        };
+
+        //@ts-ignore
+        delegateAPI(fn, ChildClass.API_LIST, { getHandler });
+
+        return fn as unknown as TestingUnit;
     }
 }
 

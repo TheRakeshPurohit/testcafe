@@ -1,7 +1,11 @@
-const expect          = require('chai').expect;
+const { expect }      = require('chai');
 const config          = require('../../config.js');
 const assertionHelper = require('../../assertion-helper.js');
+const path            = require('path');
+const fs              = require('fs');
 
+
+const SCREENSHOTS_PATH                   = path.resolve(assertionHelper.SCREENSHOTS_PATH);
 const SCREENSHOT_PATH_MESSAGE_TEXT       = 'Screenshot: ___test-screenshots___';
 const REPORT_SCREENSHOT_PATH_TEXT_RE     = /___test-screenshots___[\\/]\d{4,4}-\d{2,2}-\d{2,2}_\d{2,2}-\d{2,2}-\d{2,2}[\\/]test-1/;
 const ERROR_SCREENSHOT_PATH_RE           = /Screenshot: .*?___test-screenshots___[\\/]\d{4,4}-\d{2,2}-\d{2,2}_\d{2,2}-\d{2,2}-\d{2,2}[\\/]test-1[\\/]\S+[\\/]errors[\\/]\d.png/;
@@ -10,7 +14,7 @@ const QUARANTINE_MODE_SCREENSHOT_PATH_RE = /Screenshot: .*?___test-screenshots__
 describe('Screenshots on fails', function () {
     afterEach(assertionHelper.removeScreenshotDir);
 
-    if (config.useLocalBrowsers && config.currentEnvironmentName !== config.testingEnvironmentNames.localBrowsersIE) {
+    if (config.useLocalBrowsers) {
         it('Should take a screenshot if the ensureElement method fails', function () {
             return runTests('./testcafe-fixtures/screenshots-on-fails.js', 'Screenshot on the ensureElement method fail',
                 {
@@ -131,13 +135,29 @@ describe('Screenshots on fails', function () {
 
         it('Should crop screenshots to a page viewport area', function () {
             return runTests('./testcafe-fixtures/screenshots-on-fails.js', 'Crop screenshots',
-                { shouldFail: true, screenshotsOnFails: true, setScreenshotPath: true })
+                { shouldFail: true, screenshotsOnFails: true, setScreenshotPath: true, skip: 'safari' })
                 .catch(function (errs) {
                     assertionHelper.errorInEachBrowserContainsRegExp(errs, ERROR_SCREENSHOT_PATH_RE, 0);
                     return assertionHelper.checkScreenshotsCropped(true);
                 })
                 .then(function (result) {
                     expect(result).eql(true);
+                });
+        });
+
+        it('Should have file name respect the mask inside error folder', function () {
+            return runTests('./testcafe-fixtures/screenshots-on-fails.js', 'Screenshot on the assertion fail',
+                {
+                    shouldFail:                   true,
+                    screenshotsOnFails:           true,
+                    setScreenshotPath:            true,
+                    screenshotPathPattern:        '${TEST}/test-${FILE_INDEX}',
+                    screenshotPathPatternOnFails: '${TEST}/errors/test-${FILE_INDEX}',
+                })
+                .catch(() => {
+                    const PATH_SCREENSHOOT_ERROR = path.join(SCREENSHOTS_PATH, `Screenshot on the assertion fail`, `errors`, `test-1.png`);
+
+                    expect(fs.existsSync(PATH_SCREENSHOOT_ERROR)).eql(true);
                 });
         });
     }

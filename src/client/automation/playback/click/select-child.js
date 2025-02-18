@@ -1,10 +1,11 @@
 import hammerhead from '../../deps/hammerhead';
 import testCafeCore from '../../deps/testcafe-core';
 import testCafeUI from '../../deps/testcafe-ui';
-import MoveAutomation from '../move';
+import MoveAutomation from '../move/move';
 import { MoveOptions } from '../../../../test-run/commands/options';
-import { getDefaultAutomationOffsets } from '../../utils/offsets';
+import { getDefaultAutomationOffsets } from '../../../core/utils/offsets';
 import AutomationSettings from '../../settings';
+import cursor from '../../cursor';
 
 const Promise = hammerhead.Promise;
 
@@ -14,9 +15,10 @@ const eventSimulator   = hammerhead.eventSandbox.eventSimulator;
 const focusBlurSandbox = hammerhead.eventSandbox.focusBlur;
 const nativeMethods    = hammerhead.nativeMethods;
 
-const domUtils   = testCafeCore.domUtils;
-const styleUtils = testCafeCore.styleUtils;
-const delay      = testCafeCore.delay;
+const domUtils         = testCafeCore.domUtils;
+const styleUtils       = testCafeCore.styleUtils;
+const delay            = testCafeCore.delay;
+const selectController = testCafeCore.selectController;
 
 const selectElementUI = testCafeUI.selectElement;
 
@@ -36,7 +38,7 @@ export default class SelectChildClickAutomation {
         this.automationSettings = new AutomationSettings(clickOptions.speed);
 
         this.parentSelect       = domUtils.getSelectParent(this.element);
-        this.optionListExpanded = this.parentSelect ? selectElementUI.isOptionListExpanded(this.parentSelect) : false;
+        this.optionListExpanded = this.parentSelect ? selectController.isOptionListExpanded(this.parentSelect) : false;
         this.childIndex         = null;
         this.clickCausesChange  = false;
 
@@ -61,12 +63,11 @@ export default class SelectChildClickAutomation {
     }
 
     _calculateEventArguments () {
-        const childElement     = this.optionListExpanded ? selectElementUI.getEmulatedChildElement(this.element) : this.element;
-        const parentSelectSize = styleUtils.getSelectElementSize(this.parentSelect) > 1;
+        const childElement     = this.optionListExpanded ? selectController.getEmulatedChildElement(this.element) : this.element;
 
         return {
             options: this.modifiers,
-            element: browserUtils.isIE && parentSelectSize ? this.parentSelect : childElement,
+            element: childElement,
         };
     }
 
@@ -76,7 +77,7 @@ export default class SelectChildClickAutomation {
         let offsetY = null;
 
         if (this.optionListExpanded) {
-            element = selectElementUI.getEmulatedChildElement(this.element);
+            element = selectController.getEmulatedChildElement(this.element);
 
             const moveActionOffsets = getDefaultAutomationOffsets(element);
 
@@ -104,10 +105,10 @@ export default class SelectChildClickAutomation {
             modifiers: this.modifiers,
         }, false);
 
-        const moveAutomation = new MoveAutomation(element, moveOptions);
-
-        return moveAutomation
-            .run()
+        return MoveAutomation.create(element, moveOptions, window, cursor)
+            .then(moveAutomation => {
+                return moveAutomation.run();
+            })
             .then(() => delay(this.automationSettings.mouseActionStepDelay));
     }
 
@@ -117,12 +118,6 @@ export default class SelectChildClickAutomation {
 
             if (this.clickCausesChange)
                 this.parentSelect.selectedIndex = this.childIndex;
-
-            return this._focus();
-        }
-
-        if (browserUtils.isIE) {
-            eventSimulator.mousedown(this.eventsArgs.element, this.eventsArgs.options);
 
             return this._focus();
         }
@@ -148,22 +143,15 @@ export default class SelectChildClickAutomation {
     }
 
     _mouseup () {
-        const elementForMouseupEvent = browserUtils.isIE ? this.parentSelect : this.eventsArgs.element;
-
-        eventSimulator.mouseup(elementForMouseupEvent, this.eventsArgs.options);
-
-        if (browserUtils.isIE && this.clickCausesChange)
-            this.parentSelect.selectedIndex = this.childIndex;
+        eventSimulator.mouseup(this.eventsArgs.element, this.eventsArgs.options);
 
         const simulateInputEventOnValueChange = browserUtils.isFirefox || browserUtils.isSafari ||
                                                browserUtils.isChrome && browserUtils.version >= 53;
 
-        const simulateChangeEventOnValueChange = simulateInputEventOnValueChange || browserUtils.isIE;
-
         if (simulateInputEventOnValueChange && this.clickCausesChange)
             eventSimulator.input(this.parentSelect);
 
-        if (simulateChangeEventOnValueChange && this.clickCausesChange)
+        if (simulateInputEventOnValueChange && this.clickCausesChange)
             eventSimulator.change(this.parentSelect);
 
         return Promise.resolve();

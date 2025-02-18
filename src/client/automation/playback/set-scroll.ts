@@ -1,6 +1,8 @@
 import hammerhead from '../deps/hammerhead';
-import VisibleElementAutomation from './visible-element-automation';
+import VisibleElementAutomation from '../visible-element-automation';
 import { OffsetOptions } from '../../../test-run/commands/options';
+import cursor from '../cursor/index';
+
 
 const Promise = hammerhead.Promise;
 
@@ -35,11 +37,11 @@ function calculatePosition (el: HTMLElement, position: ScrollPosition): number[]
 }
 
 export default class SetScrollAutomation extends VisibleElementAutomation {
-    private scrollLeft: number;
-    private scrollTop: number;
+    private readonly scrollLeft: number;
+    private readonly scrollTop: number;
 
     public constructor (element: HTMLElement, { x, y, position, byX, byY }: SetScrollAutomationOptions, offsetOptions: OffsetOptions) {
-        super(element, offsetOptions);
+        super(element, offsetOptions, window, cursor);
 
         if (position)
             [x, y] = calculatePosition(element, position);

@@ -50,6 +50,28 @@ export class PageLoadError extends TestRunErrorBase {
     }
 }
 
+// Timeout errors
+//--------------------------------------------------------------------
+export class TimeoutError extends TestRunErrorBase {
+    constructor (timeout, scope) {
+        super(TEST_RUN_ERRORS.executionTimeoutExceeded);
+
+        this.timeout = timeout;
+        this.scope   = scope;
+    }
+}
+
+export class TestTimeoutError extends TimeoutError {
+    constructor (timeout) {
+        super(timeout, 'Test');
+    }
+}
+
+export class RunTimeoutError extends TimeoutError {
+    constructor (timeout) {
+        super(timeout, 'Run');
+    }
+}
 
 // Uncaught errors
 //--------------------------------------------------------------------
@@ -68,7 +90,7 @@ export class UncaughtNonErrorObjectInTestCode extends TestRunErrorBase {
         super(TEST_RUN_ERRORS.uncaughtNonErrorObjectInTestCode);
 
         this.objType = typeof obj;
-        this.objStr  = String(obj);
+        this.objStr  = this.objType === 'object' ? JSON.stringify(obj) : String(obj);
     }
 }
 
@@ -209,6 +231,59 @@ export class ActionUnsupportedDeviceTypeError extends ActionArgumentErrorBase {
     }
 }
 
+export class ActionCookieArgumentError extends TestRunErrorBase {
+    constructor () {
+        super(TEST_RUN_ERRORS.actionCookieArgumentError);
+    }
+}
+
+export class ActionCookieArgumentsError extends TestRunErrorBase {
+    constructor (index, value) {
+        super(TEST_RUN_ERRORS.actionCookieArgumentsError);
+
+        this.index       = index;
+        this.actualValue = value;
+    }
+}
+
+export class ActionUrlCookieArgumentError extends TestRunErrorBase {
+    constructor () {
+        super(TEST_RUN_ERRORS.actionUrlCookieArgumentError);
+    }
+}
+
+export class ActionUrlsCookieArgumentError extends TestRunErrorBase {
+    constructor (index, value) {
+        super(TEST_RUN_ERRORS.actionUrlsCookieArgumentError);
+
+        this.index       = index;
+        this.actualValue = value;
+    }
+}
+
+export class ActionRequiredCookieArguments extends TestRunErrorBase {
+    constructor () {
+        super(TEST_RUN_ERRORS.actionRequiredCookieArguments);
+    }
+}
+
+export class ActionUrlArgumentError extends TestRunErrorBase {
+    constructor (argumentName, actualValue) {
+        super(TEST_RUN_ERRORS.actionUrlArgumentError);
+
+        this.argumentName = argumentName;
+        this.actualValue  = actualValue;
+    }
+}
+
+export class ActionSkipJsErrorsArgumentTypeError extends TestRunErrorBase {
+    constructor (argumentName, actualValue) {
+        super(TEST_RUN_ERRORS.actionSkipJsErrorsArgumentError);
+
+        this.argumentName = argumentName;
+        this.actualValue  = actualValue;
+    }
+}
 
 // Action execution errors
 //--------------------------------------------------------------------

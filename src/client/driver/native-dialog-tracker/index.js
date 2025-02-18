@@ -12,18 +12,16 @@ const APPEARED_DIALOGS                  = 'testcafe|native-dialog-tracker|appear
 const UNEXPECTED_DIALOG                 = 'testcafe|native-dialog-tracker|unexpected-dialog';
 const ERROR_IN_HANDLER                  = 'testcafe|native-dialog-tracker|error-in-handler';
 const GETTING_PAGE_URL_PROCESSED_SCRIPT = processScript('window.location.href');
-
+const NATIVE_DIALOG_TYPES               = ['alert', 'confirm', 'prompt', 'print'];
+const GEOLOCATION_DIALOG_TYPE           = 'geolocation';
 
 export default class NativeDialogTracker {
-    constructor (contextStorage, dialogHandler) {
+    constructor (contextStorage, { dialogHandler } = {}) {
         this.contextStorage = contextStorage;
         this.dialogHandler  = dialogHandler;
 
         this._init();
         this._initListening();
-
-        if (this.dialogHandler)
-            this.setHandler(dialogHandler);
     }
 
     get appearedDialogs () {
@@ -94,9 +92,7 @@ export default class NativeDialogTracker {
                 this.contextStorage.save();
         });
 
-        window.alert   = () => this._defaultDialogHandler('alert');
-        window.confirm = () => this._defaultDialogHandler('confirm');
-        window.prompt  = () => this._defaultDialogHandler('prompt');
+        this._setCustomOrDefaultHandler();
     }
 
     _createDialogHandler (type) {
@@ -106,7 +102,7 @@ export default class NativeDialogTracker {
             this._addAppearedDialogs(type, text, url);
 
             const executor = new ClientFunctionExecutor(this.dialogHandler);
-            let result   = null;
+            let result     = null;
 
             try {
                 result = executor.fn.apply(window, [type, text, url]);
@@ -117,6 +113,37 @@ export default class NativeDialogTracker {
 
             return result;
         };
+    }
+
+    _handleGeolocationDialog (successCallback, failCallback) {
+        if (!this.dialogHandler) {
+            this._defaultDialogHandler(GEOLOCATION_DIALOG_TYPE);
+
+            successCallback();
+            return;
+        }
+
+        const url                       = NativeDialogTracker._getPageUrl();
+        const isFirstGeolocationRequest = !nativeMethods.arraySome
+            .call(this.appearedDialogs, dialog => dialog.type === GEOLOCATION_DIALOG_TYPE && dialog.url === url);
+
+        if (isFirstGeolocationRequest)
+            this._addAppearedDialogs(GEOLOCATION_DIALOG_TYPE, void 0, url);
+
+        const executor = new ClientFunctionExecutor(this.dialogHandler);
+        let result     = null;
+
+        try {
+            result = executor.fn.apply(window, [GEOLOCATION_DIALOG_TYPE, void 0, url]);
+        }
+        catch (err) {
+            this._onHandlerError(GEOLOCATION_DIALOG_TYPE, err.message || String(err), url);
+        }
+
+        if (result instanceof Error)
+            failCallback(result);
+        else
+            successCallback(result);
     }
 
     // Overridable methods
@@ -134,15 +161,43 @@ export default class NativeDialogTracker {
         this.handlerError = this.handlerError || { type, message, url };
     }
 
+    _setCustomOrDefaultHandler () {
+        NATIVE_DIALOG_TYPES.forEach(dialogType => {
+            window[dialogType] = this.dialogHandler
+                ? this._createDialogHandler(dialogType)
+                : () => this._defaultDialogHandler(dialogType);
+        });
+
+        this._setGeolocationDialogHandler();
+    }
+
+    _setGeolocationDialogHandler () {
+        const geolocationPrototype = window.Geolocation?.prototype;
+        const geolocationObject    = window.navigator?.geolocation;
+
+        // NOTE: We need to check if any mock already used by user because a lot of users used our workarounds before we introduced this dialog
+        // If such a mock is specified in geolocationPrototype or geolocationObject we need to skip our overriding
+        if (!this._shouldOverrideGeolocationDialog(geolocationPrototype) || !this._shouldOverrideGeolocationDialog(geolocationObject))
+            return;
+
+        geolocationPrototype.getCurrentPosition = this._handleGeolocationDialog.bind(this);
+    }
+
+    _shouldOverrideGeolocationDialog (geolocation) {
+        if (!geolocation?.getCurrentPosition)
+            return false;
+
+        const isNativeMethod        = nativeMethods.isNativeCode(geolocation.getCurrentPosition);
+        const isNativeDialogHandler = geolocation.getCurrentPosition === this._handleGeolocationDialog;
+
+        return isNativeMethod || isNativeDialogHandler;
+    }
+
     // API
     setHandler (dialogHandler) {
         this.dialogHandler = dialogHandler;
 
-        ['alert', 'confirm', 'prompt'].forEach(dialogType => {
-            window[dialogType] = this.dialogHandler ?
-                this._createDialogHandler(dialogType) :
-                () => this._defaultDialogHandler(dialogType);
-        });
+        this._setCustomOrDefaultHandler();
     }
 
     getUnexpectedDialogError () {

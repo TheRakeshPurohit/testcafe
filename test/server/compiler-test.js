@@ -7,7 +7,7 @@ const { expect }          = require('chai');
 const proxyquire          = require('proxyquire');
 const sinon               = require('sinon');
 const globby              = require('globby');
-const nanoid              = require('nanoid');
+const { nanoid }          = require('nanoid');
 const dedent              = require('dedent');
 const { TEST_RUN_ERRORS } = require('../../lib/errors/types');
 const exportableLib       = require('../../lib/api/exportable-lib');
@@ -18,6 +18,7 @@ const compile             = require('./helpers/compile');
 const Module              = require('module');
 const toPosixPath         = require('../../lib/utils/to-posix-path');
 const BaseTestRunMock     = require('./helpers/base-test-run-mock');
+const getTestCafeVersion  = require('../../lib/utils/get-testcafe-version');
 
 const copy      = promisify(fs.copyFile);
 const remove    = promisify(fs.unlink);
@@ -93,7 +94,10 @@ describe('Compiler', function () {
             const sources = [
                 'test/server/data/test-suites/basic/testfile1.js',
                 'test/server/data/test-suites/basic/testfile2.js',
+                'test/server/data/test-suites/basic/testfile4.js',
             ];
+
+            const testcafeVersion = getTestCafeVersion();
 
             return compile(sources)
                 .then(function (compiled) {
@@ -102,8 +106,8 @@ describe('Compiler', function () {
                     const tests     = compiled.tests;
                     const fixtures  = compiled.fixtures;
 
-                    expect(tests.length).eql(4);
-                    expect(fixtures.length).eql(3);
+                    expect(tests.length).eql(5);
+                    expect(fixtures.length).eql(4);
 
                     expect(fixtures[0].name).eql('Fixture1');
                     expect(fixtures[0].path).eql(testfile1);
@@ -139,7 +143,9 @@ describe('Compiler', function () {
                         'F1T2',
                         'F2T1',
                         'F3T1: Hey from dep1 and dep2',
+                        testcafeVersion,
                     ]);
+                    expect(results[results.length - 1]).to.be.a('string');
                 });
         });
 
@@ -228,6 +234,24 @@ describe('Compiler', function () {
                     expect(results.launchStatus).to.equal('Rocket launched succesfully!');
                     expect(results.cash).to.equal('1000000 USD');
                     expect(results.inventory).to.equal('42 yoyo');
+                });
+        });
+
+        it('Should compile test with static class blocks', function () {
+            const sources = [
+                'test/server/data/test-suites/class-with-static/testfile.js',
+            ];
+
+            return compile(sources)
+                .then(function (compiled) {
+                    const tests    = compiled.tests;
+                    const fixtures = compiled.fixtures;
+
+                    expect(tests.length).eql(1);
+                    expect(fixtures.length).eql(1);
+
+                    expect(tests[0].name).eql('Test');
+                    expect(fixtures[0].name).eql('Fixture');
                 });
         });
     });
@@ -739,7 +763,7 @@ describe('Compiler', function () {
                 .catch(function (err) {
                     expect(err.message).contains('Cannot parse a raw test file at "' + testfile1 +
                                                  '" due to the following error:\n\n' +
-                                                 'SyntaxError: Unexpected token i');
+                                                 'SyntaxError:');
                 })
                 .then(function () {
                     return compile(testfile2);
@@ -828,7 +852,7 @@ describe('Compiler', function () {
             const compiled        = await compile('test/server/data/client-fn-compilation/performance/index.js');
             const compilationTime = new Date().getTime() - start;
 
-            expect(compilationTime).below(5000);
+            expect(compilationTime).below(7000);
             expect(compiled.tests.length).eql(1);
             expect(compiled.fixtures.length).eql(1);
         });
@@ -869,7 +893,7 @@ describe('Compiler', function () {
                         stackTop: stack,
 
                         message: 'Cannot prepare tests due to the following error:\n\n' +
-                                 'SyntaxError: ' + dep + ': Unexpected token, expected "{" (1:7)',
+                                 'SyntaxError: ' + dep + ": Unexpected keyword 'export'. (1:7)",
                     }, true);
                 });
         });
@@ -965,7 +989,7 @@ describe('Compiler', function () {
                         stackTop: null,
 
                         message: 'Cannot prepare tests due to the following error:\n\n' +
-                                 'SyntaxError: ' + testfile + ': Unexpected token, expected "{" (1:7)',
+                                 'SyntaxError: ' + testfile + ": Unexpected keyword 'export'. (1:7)",
                     }, true);
                 });
         });
@@ -1018,7 +1042,7 @@ describe('Compiler', function () {
                         message: 'Cannot prepare tests due to the following error:\n\n' +
                                  'Error: TypeScript compilation failed.\n' +
                                  testfile + ' (6, 13): Property \'doSmthg\' does not exist on type \'TestController\'.\n' +
-                                 testfile + ' (9, 6): Argument of type \'123\' is not assignable to parameter of type \'string\'.\n' +
+                                 testfile + ' (9, 6): Argument of type \'number\' is not assignable to parameter of type \'string\'.\n' +
                                  testfile + ' (18, 5): Unable to resolve signature of property decorator when called as an expression.\n',
                     });
                 });

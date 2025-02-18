@@ -1,4 +1,3 @@
-/* global Symbol */
 import { assignIn } from 'lodash';
 import promisifyEvent from 'promisify-event';
 import BROWSER_JOB_RESULT from '../../runner/browser-job-result';
@@ -140,6 +139,12 @@ export default class BrowserProviderPluginHost {
         this.reportWarning(browserId, WARNING_MESSAGE.maximizeNotSupportedByBrowserProvider, this[name]);
     }
 
+    async startCapturingVideo (/*browserId*/) {
+    }
+
+    async stopCapturingVideo (/*browserId*/) {
+    }
+
     async getVideoFrameData (browserId) {
         const browserAlias = BrowserConnection.getById(browserId).browserInfo.alias;
 
@@ -152,5 +157,29 @@ export default class BrowserProviderPluginHost {
 
     getConfig (value) {
         return value;
+    }
+
+    async closeBrowserChildWindow (/*browserId, windowId*/) {
+        return Promise.resolve();
+    }
+
+    async getOSInfo (/*browserId*/) {
+        return null;
+    }
+
+    supportNativeAutomation () {
+        return false;
+    }
+
+    getNativeAutomation (/*browserId*/) {
+        return null;
+    }
+
+    getNewWindowIdInNativeAutomation (/*browserId, windowId*/) {
+        return Promise.resolve();
+    }
+
+    async getCurrentCDPSession (/*browserId*/) {
+        return Promise.resolve();
     }
 }

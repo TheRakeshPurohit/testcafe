@@ -12,18 +12,22 @@ import resolvePathRelativelyCwd from '../utils/resolve-path-relatively-cwd';
 import {
     DEFAULT_APP_INIT_DELAY,
     DEFAULT_CONCURRENCY_VALUE,
+    DEFAULT_DEVELOPMENT_MODE,
+    DEFAULT_DISABLE_CROSS_DOMAIN,
+    DEFAULT_DISABLE_HTTP2,
+    DEFAULT_FILTER_FN,
+    DEFAULT_DISABLE_NATIVE_AUTOMATION,
+    DEFAULT_RETRY_TEST_PAGES,
+    DEFAULT_SCREENSHOT_THUMBNAILS,
+    DEFAULT_SOURCE_DIRECTORIES,
     DEFAULT_SPEED_VALUE,
     DEFAULT_TIMEOUT,
-    DEFAULT_SOURCE_DIRECTORIES,
-    DEFAULT_DEVELOPMENT_MODE,
-    DEFAULT_RETRY_TEST_PAGES,
-    DEFAULT_DISABLE_HTTP2,
-    DEFAULT_PROXYLESS,
-    DEFAULT_SCREENSHOT_THUMBNAILS,
+    DEFAULT_EXPERIMENTAL_MULTIPLE_WINDOWS,
     getDefaultCompilerOptions,
 } from './default-values';
 
 import OptionSource from './option-source';
+
 import {
     Dictionary,
     FilterOption,
@@ -35,18 +39,19 @@ import CustomizableCompilers from './customizable-compilers';
 import { DEPRECATED, getDeprecationMessage } from '../notifications/deprecated';
 import WarningLog from '../notifications/warning-log';
 import browserProviderPool from '../browser/provider/pool';
-import BrowserConnection, { BrowserInfo } from '../browser/connection';
-import { CONFIGURATION_EXTENSIONS } from './formats';
+import BrowserConnection, { BrowserConnectionOptions, BrowserInfo } from '../browser/connection';
+import Extensions from './formats';
 import { GeneralError } from '../errors/runtime';
 import { RUNTIME_ERRORS } from '../errors/types';
+import { LOCALHOST_NAMES } from '../utils/localhost-names';
+import { BrowserConnectionGatewayOptions } from '../browser/connection/gateway';
+import { getValidHostname } from './utils';
 
 const BASE_CONFIGURATION_FILENAME = '.testcaferc';
-const CONFIGURATION_FILENAMES     = CONFIGURATION_EXTENSIONS.map(ext => `${BASE_CONFIGURATION_FILENAME}${ext}`);
-
+const CONFIGURATION_FILENAMES     = (Object.keys(Extensions) as Array<keyof typeof Extensions>).map(ext => `${BASE_CONFIGURATION_FILENAME}${Extensions[ext]}`);
 const DEFAULT_SCREENSHOTS_DIRECTORY = 'screenshots';
 
 const OPTION_FLAG_NAMES = [
-    OPTION_NAMES.skipJsErrors,
     OPTION_NAMES.debugMode,
     OPTION_NAMES.debugOnFail,
     OPTION_NAMES.skipUncaughtErrors,
@@ -63,25 +68,27 @@ const OPTION_INIT_FLAG_NAMES = [
     OPTION_NAMES.retryTestPages,
     OPTION_NAMES.cache,
     OPTION_NAMES.disableHttp2,
-    OPTION_NAMES.proxyless,
+    OPTION_NAMES.disableNativeAutomation,
+    OPTION_NAMES.disableCrossDomain,
+    OPTION_NAMES.experimentalMultipleWindows,
 ];
 
-interface TestCafeAdditionalStartOptions {
+export interface TestCafeStartOptions {
+    hostname: string;
+    port1: number;
+    port2: number;
     retryTestPages: boolean;
-    ssl: string;
+    ssl: object;
     developmentMode: boolean;
     cache: boolean;
     disableHttp2: boolean;
-}
-
-interface TestCafeStartOptions {
-    hostname?: string;
-    port1?: number;
-    port2?: number;
-    options: TestCafeAdditionalStartOptions;
+    nativeAutomation: boolean;
+    disableCrossDomain: boolean;
 }
 
 type BrowserInfoSource = BrowserInfo | BrowserConnection;
+
+type CalculateHostnameFn = (hostname: string) => Promise<string>;
 
 export default class TestCafeConfiguration extends Configuration {
     protected readonly _isExplicitConfig: boolean;
@@ -92,7 +99,7 @@ export default class TestCafeConfiguration extends Configuration {
         this._isExplicitConfig = !!configFile;
     }
 
-    public async init (options?: object): Promise<void> {
+    public async init (options?: Dictionary<object>): Promise<void> {
         await super.init();
 
         const opts = await this._load();
@@ -106,12 +113,12 @@ export default class TestCafeConfiguration extends Configuration {
         await this.asyncMergeOptions(options);
     }
 
-    public async asyncMergeOptions (options?: object): Promise<void> {
+    public async asyncMergeOptions (options?: Dictionary<object>): Promise<void> {
         options = options || {};
 
         super.mergeOptions(options);
 
-        if (this._options.browsers)
+        if (!options.isCli && this._options.browsers)
             this._options.browsers.value = await this._getBrowserInfo();
     }
 
@@ -145,25 +152,36 @@ export default class TestCafeConfiguration extends Configuration {
     }
 
     public get startOptions (): TestCafeStartOptions {
-        const result: TestCafeStartOptions = {
-            hostname: this.getOption(OPTION_NAMES.hostname) as string,
-            port1:    this.getOption(OPTION_NAMES.port1) as number,
-            port2:    this.getOption(OPTION_NAMES.port2) as number,
-
-            options: {
-                ssl:             this.getOption(OPTION_NAMES.ssl) as string,
-                developmentMode: this.getOption(OPTION_NAMES.developmentMode) as boolean,
-                retryTestPages:  this.getOption(OPTION_NAMES.retryTestPages) as boolean,
-                cache:           this.getOption(OPTION_NAMES.cache) as boolean,
-                disableHttp2:    this.getOption(OPTION_NAMES.disableHttp2) as boolean,
-            },
+        return {
+            hostname:           this.getOption(OPTION_NAMES.hostname),
+            port1:              this.getOption(OPTION_NAMES.port1),
+            port2:              this.getOption(OPTION_NAMES.port2),
+            ssl:                this.getOption(OPTION_NAMES.ssl),
+            developmentMode:    this.getOption(OPTION_NAMES.developmentMode),
+            retryTestPages:     this.getOption(OPTION_NAMES.retryTestPages),
+            cache:              this.getOption(OPTION_NAMES.cache),
+            disableHttp2:       this.getOption(OPTION_NAMES.disableHttp2),
+            disableCrossDomain: this.getOption(OPTION_NAMES.disableCrossDomain),
+            nativeAutomation:   !this.getOption(OPTION_NAMES.disableNativeAutomation),
         };
-
-        return result;
     }
 
-    private _prepareFlag (name: string): void {
-        const option = this._ensureOption(name, void 0, OptionSource.Configuration);
+    public get browserConnectionGatewayOptions (): BrowserConnectionGatewayOptions {
+        return {
+            retryTestPages: this.getOption(OPTION_NAMES.retryTestPages),
+        };
+    }
+
+    public get remoteBrowserConnectionOptions (): BrowserConnectionOptions {
+        return {
+            disableMultipleWindows: true,
+            nativeAutomation:       false,
+            developmentMode:        this.getOption(OPTION_NAMES.developmentMode),
+        };
+    }
+
+    private _prepareFlag (name: string, source = OptionSource.Configuration): void {
+        const option = this._ensureOption(name, void 0, source);
 
         option.value = !!option.value;
     }
@@ -173,7 +191,7 @@ export default class TestCafeConfiguration extends Configuration {
     }
 
     private _prepareInitFlags (): void {
-        OPTION_INIT_FLAG_NAMES.forEach(name => this._prepareFlag(name));
+        OPTION_INIT_FLAG_NAMES.forEach(name => this._prepareFlag(name, OptionSource.Default));
     }
 
     private async _normalizeOptionsAfterLoad (): Promise<void> {
@@ -187,7 +205,7 @@ export default class TestCafeConfiguration extends Configuration {
     }
 
     private _prepareFilterFn (): void {
-        const filterOption = this._ensureOption(OPTION_NAMES.filter, null, OptionSource.Configuration);
+        const filterOption = this._ensureOption(OPTION_NAMES.filter, DEFAULT_FILTER_FN, OptionSource.Default);
 
         if (!filterOption.value)
             return;
@@ -200,7 +218,8 @@ export default class TestCafeConfiguration extends Configuration {
         if (filterOptionValue.fixtureGrep)
             filterOptionValue.fixtureGrep = getGrepOptions(OPTION_NAMES.filterFixtureGrep, filterOptionValue.fixtureGrep as string);
 
-        filterOption.value = getFilterFn(filterOption.value) as Function;
+        filterOption.value  = getFilterFn(filterOption.value) as Function;
+        filterOption.source = OptionSource.Configuration;
     }
 
     private _ensureScreenshotOptions (): void {
@@ -212,6 +231,13 @@ export default class TestCafeConfiguration extends Configuration {
 
         if (screenshots.thumbnails === void 0)
             screenshots.thumbnails = DEFAULT_SCREENSHOT_THUMBNAILS;
+    }
+
+    private _ensureSkipJsOptions (): void {
+        const option = this._ensureOption(OPTION_NAMES.skipJsErrors, void 0, OptionSource.Configuration);
+
+        if (option.value === void 0)
+            option.value = !!option.value;
     }
 
     private _prepareReporters (): void {
@@ -245,9 +271,12 @@ export default class TestCafeConfiguration extends Configuration {
         this._ensureOptionWithValue(OPTION_NAMES.developmentMode, DEFAULT_DEVELOPMENT_MODE, OptionSource.Configuration);
         this._ensureOptionWithValue(OPTION_NAMES.retryTestPages, DEFAULT_RETRY_TEST_PAGES, OptionSource.Configuration);
         this._ensureOptionWithValue(OPTION_NAMES.disableHttp2, DEFAULT_DISABLE_HTTP2, OptionSource.Configuration);
-        this._ensureOptionWithValue(OPTION_NAMES.proxyless, DEFAULT_PROXYLESS, OptionSource.Configuration);
+        this._ensureOptionWithValue(OPTION_NAMES.disableNativeAutomation, DEFAULT_DISABLE_NATIVE_AUTOMATION, OptionSource.Configuration);
+        this._ensureOptionWithValue(OPTION_NAMES.experimentalMultipleWindows, DEFAULT_EXPERIMENTAL_MULTIPLE_WINDOWS, OptionSource.Configuration);
+        this._ensureOptionWithValue(OPTION_NAMES.disableCrossDomain, DEFAULT_DISABLE_CROSS_DOMAIN, OptionSource.Configuration);
 
         this._ensureScreenshotOptions();
+        this._ensureSkipJsOptions();
     }
 
     private _prepareCompilerOptions (): void {
@@ -291,5 +320,24 @@ export default class TestCafeConfiguration extends Configuration {
 
     public static get FILENAMES (): string[] {
         return CONFIGURATION_FILENAMES;
+    }
+
+    public async ensureHostname (calculateFn: CalculateHostnameFn = getValidHostname): Promise<void> {
+        let hostname = this.getOption<string>(OPTION_NAMES.hostname);
+
+        hostname = await calculateFn(hostname);
+
+        this.mergeOptions({ hostname });
+    }
+
+    public async calculateHostname ({ nativeAutomation } = { nativeAutomation: false }): Promise<void> {
+        await this.ensureHostname(async hostname => {
+            if (nativeAutomation)
+                hostname = LOCALHOST_NAMES.LOCALHOST;
+            else
+                hostname = await getValidHostname(hostname);
+
+            return hostname;
+        });
     }
 }

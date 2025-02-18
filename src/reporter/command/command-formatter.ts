@@ -1,8 +1,9 @@
 import { isEmpty } from 'lodash';
-import { ExecuteSelectorCommand, ExecuteClientFunctionCommand } from '../../test-run/commands/observation';
+import { ExecuteSelectorCommand, ExecuteClientFunctionCommand } from '../../test-run/commands/execute-client-function';
 import {
     NavigateToCommand,
     PressKeyCommand,
+    RunCustomActionCommand,
     SetNativeDialogHandlerCommand,
     TypeTextCommand,
     UseRoleCommand,
@@ -21,9 +22,6 @@ import {
 } from '../../test-run/commands/options';
 
 import { CommandBase } from '../../test-run/commands/base';
-import CommandType from '../../test-run/commands/type';
-import { AssertionCommand } from '../../test-run/commands/assertion';
-
 
 const CONFIDENTIAL_INFO_PLACEHOLDER = '********';
 
@@ -42,7 +40,7 @@ export class CommandFormatter {
     }
 
     public format (): FormattedCommand {
-        const formattedCommand: FormattedCommand = { type: this._command.type };
+        const formattedCommand: FormattedCommand = { type: this._command.type, actionId: this._command.actionId };
 
         if (this._command instanceof ExecuteSelectorCommand)
             formattedCommand.selector = this._prepareSelector(this._command, 'selector');
@@ -56,6 +54,9 @@ export class CommandFormatter {
             formattedCommand.dialogHandler = this._prepareDialogHandler(this._command);
         else
             this._assignProperties(this._command, formattedCommand);
+
+        if (this._command instanceof RunCustomActionCommand)
+            formattedCommand.actionResult = this._result;
 
         this._maskConfidentialInfo(formattedCommand);
 
@@ -128,20 +129,11 @@ export class CommandFormatter {
         return command.url;
     }
 
-    private _filterNotReportedProperties (properties: string[], commandType: string): string[] {
-        if (commandType !== CommandType.assertion)
-            return properties;
-
-        return properties.filter(prop => !AssertionCommand.NOT_REPORTED_PROPERTIES.includes(prop));
-    }
-
     private _assignProperties (command: CommandBase, formattedCommand: FormattedCommand): void {
-        if (!this._command._getAssignableProperties)
+        if (!this._command.getReportedProperties)
             return;
 
-        let sourceProperties = this._command._getAssignableProperties().map(prop => prop.name);
-
-        sourceProperties = this._filterNotReportedProperties(sourceProperties, this._command.type);
+        const sourceProperties = this._command.getReportedProperties();
 
         sourceProperties.forEach((key: string) => {
             const property = this._command[key];
@@ -168,7 +160,7 @@ export class CommandFormatter {
         this._elements = Array.isArray(decoded) ? decoded : [decoded];
     }
 
-    private static _getModifiedOptions (commandOptions: object): Dictionary<object> | null {
+    private static _getModifiedOptions (commandOptions: object): Dictionary<object> {
         const constructor    = commandOptions.constructor as ObjectConstructor;
         const defaultOptions = new constructor();
 

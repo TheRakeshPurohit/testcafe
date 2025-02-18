@@ -2,7 +2,7 @@ import { createContext } from 'vm';
 import Module from 'module';
 import path from 'path';
 import exportableLib from '../exportable-lib';
-import NODE_MODULES from '../../shared/node-modules-folder-name';
+import NODE_MODULES from '../../utils/node-modules-folder-name';
 
 const OPTIONS_KEY = Symbol('options');
 
@@ -44,7 +44,9 @@ function createRequire (filename) {
 
 function createSelectorDefinition (testRun) {
     return (fn, options = {}) => {
-        const { skipVisibilityCheck, collectionMode } = testRun.controller.getExecutionContext()[OPTIONS_KEY];
+        const { skipVisibilityCheck, collectionMode } = testRun.controller ?
+            testRun.controller.getExecutionContext()[OPTIONS_KEY] :
+            createExecutionContext(testRun)[OPTIONS_KEY];
 
         if (skipVisibilityCheck)
             options.visibilityCheck = false;

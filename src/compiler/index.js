@@ -15,17 +15,18 @@ import { getTestFileCompilers, initTestFileCompilers } from './compilers';
 const SOURCE_CHUNK_LENGTH = 1000;
 
 export default class Compiler {
-    constructor (sources, options, isCompilerServiceMode) {
+    constructor (sources, compilerOptions, { baseUrl, esm } = {} ) {
         this.sources = sources;
+        this.esm = esm;
 
-        initTestFileCompilers(options, isCompilerServiceMode);
+        initTestFileCompilers(compilerOptions, { baseUrl, esm });
     }
 
     static getSupportedTestFileExtensions () {
         return uniq(flattenDeep(getTestFileCompilers().map(compiler => compiler.getSupportedExtension())));
     }
 
-    async _createTestFileInfo (filename) {
+    static async createTestFileInfo (filename, esm = false) {
         let code = null;
 
         try {
@@ -37,7 +38,7 @@ export default class Compiler {
 
         code = stripBom(code).toString();
 
-        const compiler = find(getTestFileCompilers(), someCompiler => someCompiler.canCompile(code, filename));
+        const compiler = find(getTestFileCompilers(esm), someCompiler => someCompiler.canCompile(code, filename));
 
         if (!compiler)
             return null;
@@ -52,13 +53,13 @@ export default class Compiler {
     }
 
     async _createTestFilesInfo (filenames) {
-        const testFilesInfo = await Promise.all(filenames.map(filename => this._createTestFileInfo(filename)));
+        const testFilesInfo = await Promise.all(filenames.map(filename => Compiler.createTestFileInfo(filename)));
 
         return testFilesInfo.filter(info => !!info);
     }
 
     async _precompileFiles (compiler, testFilesInfo) {
-        if (!compiler.canPrecompile)
+        if (!compiler.canPrecompile || this.esm && compiler.canCompileInEsm)
             return;
 
         const precompiledCode = await compiler.precompile(testFilesInfo);
@@ -86,7 +87,7 @@ export default class Compiler {
     }
 
     async _getTests ({ compiler, filename, code, compiledCode }) {
-        if (compiledCode)
+        if (compiledCode || this.esm && compiler.canCompileInEsm)
             return await compiler.execute(compiledCode, filename);
 
         return await compiler.compile(code, filename);

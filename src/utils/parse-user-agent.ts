@@ -1,9 +1,15 @@
 import Bowser from 'bowser';
+import { OSInfo } from 'get-os-info';
 
 const DEFAULT_NAME            = 'Other';
 const DEFAULT_VERSION         = '0.0';
 const DEFAULT_PLATFORM_TYPE   = DEFAULT_NAME.toLowerCase();
 const EMPTY_PARSED_USER_AGENT = Bowser.parse(' ');
+
+const HEADLESS_EDGE = {
+    regExp:      /HeadlessEdg/i,
+    browserName: 'Microsoft Edge',
+};
 
 interface ParsedComponent {
     name: string;
@@ -51,14 +57,29 @@ function calculateEngine (engineDetails: Bowser.Parser.EngineDetails): ParsedCom
     };
 }
 
-function calculatePrettyUserAgent (browser: ParsedComponent, os: ParsedComponent): string {
+function calculateParsedUserAgent (userAgent: string): Bowser.Parser.ParsedResult {
+    if (!userAgent)
+        return EMPTY_PARSED_USER_AGENT;
+
+    // The 'bowser' module incorrectly determine the headless edge browser.
+    // Since this module is abandoned, we are forced to fix it on our side.
+    const isHeadlessEdge  = HEADLESS_EDGE.regExp.test(userAgent);
+    const parsedUserAgent = Bowser.parse(userAgent);
+
+    if (isHeadlessEdge)
+        parsedUserAgent.browser.name = HEADLESS_EDGE.browserName;
+
+    return parsedUserAgent;
+}
+
+export function calculatePrettyUserAgent (browser: ParsedComponent, os: ParsedComponent): string {
     return `${browser.name} ${browser.version} / ${os.name} ${os.version}`;
 }
 
-export default function parseUserAgent (userAgent: string = ''): ParsedUserAgent {
-    const parsedUserAgent = userAgent ? Bowser.parse(userAgent) : EMPTY_PARSED_USER_AGENT;
+export function parseUserAgent (userAgent = '', osInfo?: OSInfo): ParsedUserAgent {
+    const parsedUserAgent = calculateParsedUserAgent(userAgent);
     const browser         = calculateBrowser(parsedUserAgent.browser);
-    const os              = calculateOs(parsedUserAgent.os);
+    const os              = osInfo || calculateOs(parsedUserAgent.os);
     const engine          = calculateEngine(parsedUserAgent.engine);
     const prettyUserAgent = calculatePrettyUserAgent(browser, os);
 

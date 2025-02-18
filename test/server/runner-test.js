@@ -1,11 +1,11 @@
 /*eslint-disable no-console */
-
 const path                    = require('path');
 const { expect }              = require('chai');
 const fs                      = require('fs');
 const del                     = require('del');
-const request                 = require('request');
+const fetch                   = require('node-fetch');
 const { times, uniqBy }       = require('lodash');
+const stripAnsi               = require('strip-ansi');
 const consoleWrapper          = require('./helpers/console-wrapper');
 const isAlpine                = require('./helpers/is-alpine');
 const createTestCafe          = require('../../lib/');
@@ -20,33 +20,30 @@ const { RUNTIME_ERRORS }      = require('../../lib/errors/types');
 const { createReporter }      = require('../functional/utils/reporter');
 const proxyquire              = require('proxyquire');
 const BrowserConnectionStatus = require('../../lib/browser/connection/status');
-const { noop }                = require('lodash');
-const Test                    = require('../../lib/api/structure/test');
 const TestCafeConfiguration   = require('../../lib/configuration/testcafe-configuration');
+const fakeReporterWithError   = require('./data/reporter/fake-reporter-with-error');
+
+const {
+    browserConnectionGatewayMock,
+    browserSetMock,
+    configurationMock,
+    createBrowserProviderMock,
+} = require('./helpers/mocks');
+
+const Test = require('../../lib/api/structure/test');
 
 const createConfigFile = (configPath, options) => {
     options = options || {};
     fs.writeFileSync(configPath, JSON.stringify(options));
 };
 
-
 describe('Runner', () => {
-    let testCafe                  = null;
-    let runner                    = null;
-    let connection                = null;
-    let origRemoteBrowserProvider = null;
+    let testCafe                    = null;
+    let runner                      = null;
+    let connection                  = null;
+    let originRemoteBrowserProvider = null;
 
     const BROWSER_NAME = `${isAlpine() ? 'chromium' : 'chrome'}:headless`;
-
-    const remoteBrowserProviderMock = {
-        openBrowser () {
-            return Promise.resolve();
-        },
-
-        closeBrowser () {
-            return Promise.resolve();
-        },
-    };
 
     before(() => {
         return createTestCafe('127.0.0.1', 1335, 1336)
@@ -56,9 +53,9 @@ describe('Runner', () => {
                 return browserProviderPool.getProvider('remote');
             })
             .then(remoteBrowserProvider => {
-                origRemoteBrowserProvider = remoteBrowserProvider;
+                originRemoteBrowserProvider = remoteBrowserProvider;
 
-                browserProviderPool.addProvider('remote', remoteBrowserProviderMock);
+                browserProviderPool.addProvider('remote', createBrowserProviderMock());
 
                 return testCafe.createBrowserConnection();
             })
@@ -70,10 +67,11 @@ describe('Runner', () => {
             });
     });
 
-    after(() => {
-        browserProviderPool.addProvider('remote', origRemoteBrowserProvider);
+    after(async () => {
+        browserProviderPool.addProvider('remote', originRemoteBrowserProvider);
 
-        connection.close();
+        await connection.close();
+
         return testCafe.close();
     });
 
@@ -87,7 +85,7 @@ describe('Runner', () => {
 
     describe('.browsers()', () => {
         it('Should raise an error if browser was not found for the alias', function () {
-            this.timeout(5000);
+            this.timeout(10000);
 
             return runner
                 .browsers('browser42')
@@ -103,7 +101,9 @@ describe('Runner', () => {
                 });
         });
 
-        it('Should raise an error if an unprefixed path is provided', () => {
+        it('Should raise an error if an unprefixed path is provided', function () {
+            this.timeout(10000);
+
             return runner
                 .browsers('/Applications/Firefox.app')
                 .reporter('list')
@@ -156,8 +156,58 @@ describe('Runner', () => {
                     throw new Error('Promise rejection expected');
                 })
                 .catch(err => {
-                    expect(err.message).eql('The "reporter42" reporter does not exist. ' +
-                                            'Check the reporter parameter for errors.');
+                    expect(err.message).eql('Failed to load the "reporter42" reporter. Please check the parameter for errors. Error details:' +
+                                            '\n\n' +
+                                            'Cannot find module \'testcafe-reporter-reporter42\'');
+                });
+        });
+
+        it('Should raise an ModuleNotFound error if reporter has non-existing import', () => {
+            const fakeReporter = function fake () {
+                this.nonExistingModule = require('non-existing-module');
+            };
+
+            return runner
+                .browsers(connection)
+                .reporter(fakeReporter)
+                .src('test/server/data/test-suites/basic/testfile2.js')
+                .run()
+                .then(() => {
+                    throw new Error('Promise rejection expected');
+                })
+                .catch(err => {
+                    expect(err.message.startsWith(
+                        'Failed to load the "fake" reporter. Please check the parameter for errors. Error details:' +
+                        '\n\n' +
+                        'Cannot find module \'non-existing-module\'\n' +
+                        'Require stack:\n'
+                    )).eql(true);
+                });
+        });
+
+        it('Should raise an error if reporter code contains an error', () => {
+            return runner
+                .browsers(connection)
+                .reporter(fakeReporterWithError)
+                .src('test/server/data/test-suites/basic/testfile2.js')
+                .run()
+                .then(() => {
+                    throw new Error('Promise rejection expected');
+                })
+                .catch(err => {
+                    expect(stripAnsi(err.message)).eql(
+                        'Failed to load the "fakeReporter" reporter. Please check the parameter for errors. Error details:' +
+                             '\n\n' +
+                             'undefProp is not defined' +
+                             '\n\n' +
+                             '   1 |module.exports = function fakeReporter() {\n' +
+                             '   2 |    return {\n' +
+                             ' > 3 |        someProp: undefProp\n' +
+                             '   4 |    }\n' +
+                             '   5 |}\n' +
+                             '   6 |\n\n' +
+                             `   at fakeReporter (${path.resolve('./test/server/data/reporter/fake-reporter-with-error.js')}:3:19)`
+                    );
                 });
         });
 
@@ -167,6 +217,7 @@ describe('Runner', () => {
             runner._runTask = ({ reporters }) => {
                 const reporterPlugin = reporters[0].plugin;
 
+                expect(reporterPlugin.name).eql('spec');
                 expect(reporterPlugin.reportFixtureStart).to.be.a('function');
                 expect(reporterPlugin.reportTestDone).to.be.a('function');
                 expect(reporterPlugin.reportTaskStart).to.be.a('function');
@@ -308,8 +359,9 @@ describe('Runner', () => {
                     takeOnFails: true,
                     pathPattern: 'pathPattern',
                     fullPage:    true,
-                })
-                ._applyOptions();
+                });
+            await runner._setConfigurationOptions();
+            await runner._setBootstrapperOptions();
 
             expect(runner.configuration.getOption('screenshots').path).eql('path');
             expect(runner.configuration.getOption('screenshots').takeOnFails).eql(true);
@@ -320,17 +372,20 @@ describe('Runner', () => {
         it('Validate screenshot options. The `screenshots` option has priority', () => {
             runner.configuration.mergeOptions({
                 'screenshots': {
-                    'path':        'path1',
-                    'pathPattern': 'pattern1',
-                    'fullPage':    true,
+                    'path':               'path1',
+                    'pathPattern':        'pattern1',
+                    'pathPatternOnFails': 'patternOnFails1',
+                    'fullPage':           true,
                 },
-                'screenshotPath':        'path2',
-                'screenshotPathPattern': 'pattern2',
+                'screenshotPath':               'path2',
+                'screenshotPathPattern':        'pattern2',
+                'screenshotPathPatternOnFails': 'patternOnFails2',
             });
 
             expect(runner._getScreenshotOptions()).eql({
-                path:        'path1',
-                pathPattern: 'pattern1',
+                path:               'path1',
+                pathPattern:        'pattern1',
+                pathPatternOnFails: 'patternOnFails1',
             });
         });
 
@@ -339,13 +394,15 @@ describe('Runner', () => {
                 'screenshots': {
                     'fullPage': true,
                 },
-                'screenshotPath':        'path2',
-                'screenshotPathPattern': 'pattern2',
+                'screenshotPath':               'path2',
+                'screenshotPathPattern':        'pattern2',
+                'screenshotPathPatternOnFails': 'patternOnFails2',
             });
 
             expect(runner._getScreenshotOptions()).eql({
-                path:        'path2',
-                pathPattern: 'pattern2',
+                path:               'path2',
+                pathPattern:        'pattern2',
+                pathPatternOnFails: 'patternOnFails2',
             });
         });
 
@@ -380,7 +437,7 @@ describe('Runner', () => {
                 .catch(err => {
                     expect(err.message).eql(
                         'Cannot enable the \'retryTestPages\' option. Apply one of the following two solutions:\n' +
-                        '-- set \'localhost\' as the value of the \'hostname\' option\n' +
+                        '-- set the \'hostname\' option to \'localhost\'\n' +
                         '-- run TestCafe over HTTPS\n'
                     );
                 });
@@ -463,14 +520,13 @@ describe('Runner', () => {
                 'test/server/data/test-suites/basic/testfile1.js',
                 'test/server/data/test-suites/basic/testfile2.js',
                 'test/server/data/test-suites/basic/testfile3.js',
+                'test/server/data/test-suites/basic/testfile4.js',
             ].map(file => path.resolve(cwd, file));
 
             runner.bootstrapper._getBrowserConnections = () => {
                 runner.bootstrapper._getBrowserConnections = storedGetBrowserConnectionsFn;
 
-                return Promise.resolve({
-                    browserConnectionGroups: [],
-                });
+                return Promise.resolve(browserSetMock);
             };
 
             runner._runTask = ({ tests }) => {
@@ -701,8 +757,8 @@ describe('Runner', () => {
                                             '1 of 1 browser connections have not been established:\n' +
                                             '- remote\n\n' +
                                             'Hints:\n' +
-                                            '- Increase the value of the "browserInitTimeout" option if it is too low ' +
-                                            '(currently: 0.1 seconds for all browsers). This option determines how long TestCafe waits for browsers to be ready.\n' +
+                                            '- Increase the Browser Initialization Timeout if its value is too low ' +
+                                            '(currently: 0.1 seconds for all browsers). The timeout determines how long TestCafe waits for browsers to be ready.\n' +
                                             '- The error can also be caused by network issues or remote device failure. ' +
                                             'Make sure that your network connection is stable and you can reach the remote device.');
                 });
@@ -751,7 +807,6 @@ describe('Runner', () => {
                     connections[1].HEARTBEAT_TIMEOUT = 200;
 
                     const options = {
-                        url:            connections[0].url,
                         followRedirect: false,
                         headers:        {
                             'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 ' +
@@ -759,7 +814,7 @@ describe('Runner', () => {
                         },
                     };
 
-                    request(options);
+                    fetch(connections[0].url, options);
 
                     return run;
                 })
@@ -945,24 +1000,19 @@ describe('Runner', () => {
         });
 
         describe('On Linux without a graphics subsystem', () => {
-
-            const browserConnectionGateway = {
-                startServingConnection: noop,
-                stopServingConnection:  noop,
-            };
-            const compilerService          = {
-                init:     noop,
-                getTests: () => [new Test({ currentFixture: void 0 })],
-            };
-
             let runnerLinux = null;
 
             class BrowserConnectionMock extends BrowserConnection {
                 constructor (...args) {
+                    if (!args[0])
+                        args[0] = browserConnectionGatewayMock;
+
                     super(...args);
 
                     this.status = BrowserConnectionStatus.opened;
                 }
+
+                async _runBrowser () { }
             }
 
             function setupBootstrapper () {
@@ -970,7 +1020,16 @@ describe('Runner', () => {
                     '../browser/connection': BrowserConnectionMock,
                 });
 
-                return new BootstrapperMock({ browserConnectionGateway, compilerService });
+                const bootstrapperMock = new BootstrapperMock({
+                    browserConnectionGateway: browserConnectionGatewayMock,
+                    configuration:            configurationMock,
+                });
+
+                bootstrapperMock._compileTests = async () => {
+                    return [ new Test({ currentFixture: void 0 }) ];
+                };
+
+                return bootstrapperMock;
             }
 
             function createMockRunner () {
@@ -981,9 +1040,8 @@ describe('Runner', () => {
 
                 const runnerLocal = new RunnerMock({
                     proxy:                    testCafe.proxy,
-                    browserConnectionGateway: browserConnectionGateway,
+                    browserConnectionGateway: browserConnectionGatewayMock,
                     configuration:            testCafe.configuration.clone(),
-                    compilerService:          compilerService,
                 });
 
                 runnerLocal.bootstrapper = setupBootstrapper();
@@ -1008,7 +1066,7 @@ describe('Runner', () => {
                     })
                     .catch((err) => {
                         expect(err.message).eql(
-                            `Your Linux version does not have a graphic subsystem to run ${browserName} with a GUI. ` +
+                            `Your Linux installation does not have a graphic subsystem to run ${browserName} with a GUI. ` +
                             'You can launch the browser in headless mode. ' +
                             'If you use a portable browser executable, ' +
                             "specify the browser alias before the path instead of the 'path' prefix. " +
@@ -1027,7 +1085,7 @@ describe('Runner', () => {
                     })
                     .catch((err) => {
                         expect(err.message).eql(
-                            'Your Linux version does not have a graphic subsystem to run {"path":"/non/exist"} with a GUI. ' +
+                            'Your Linux installation does not have a graphic subsystem to run {"path":"/non/exist"} with a GUI. ' +
                             'You can launch the browser in headless mode. ' +
                             'If you use a portable browser executable, ' +
                             `specify the browser alias before the path instead of the 'path' prefix. ` +
@@ -1038,36 +1096,41 @@ describe('Runner', () => {
             });
 
             it('Should not raise an error when browser is specified as headless', async function () {
+                this.timeout(10000);
                 let isErrorThrown = false;
 
-                return runnerLinux
-                    .browsers(`${BROWSER_NAME}`)
-                    ._applyOptions()
-                    .then(() => runnerLinux._validateRunOptions())
-                    .then(() => runnerLinux._createRunnableConfiguration())
-                    .catch(() => {
-                        isErrorThrown = true;
-                    })
-                    .finally(() => {
-                        expect(isErrorThrown).to.be.false;
-                    });
+                try {
+                    await runnerLinux.browsers(`${BROWSER_NAME}`);
+                    await runnerLinux._setConfigurationOptions();
+                    await runnerLinux._setBootstrapperOptions();
+                    await runnerLinux._validateRunOptions();
+                    await runnerLinux._createRunnableConfiguration();
+                }
+                catch (e) {
+                    isErrorThrown = true;
+                }
+
+                expect(isErrorThrown).to.be.false;
             });
 
             it('Should not raise an error when remote browser is passed as BrowserConnection', async function () {
+                this.timeout(200000000);
+
                 const browserInfo = await browserProviderPool.getBrowserInfo('remote');
                 let isErrorThrown = false;
 
-                return runnerLinux
-                    .browsers([new BrowserConnection(browserConnectionGateway, browserInfo)])
-                    ._applyOptions()
-                    .then(() => runnerLinux._validateRunOptions())
-                    .then(() => runnerLinux._createRunnableConfiguration())
-                    .catch(() => {
-                        isErrorThrown = true;
-                    })
-                    .finally(() => {
-                        expect(isErrorThrown).to.be.false;
-                    });
+                try {
+                    await runnerLinux.browsers([new BrowserConnection(browserConnectionGatewayMock, browserInfo)]);
+                    await runnerLinux._setConfigurationOptions();
+                    await runnerLinux._setBootstrapperOptions();
+                    await runnerLinux._validateRunOptions();
+                    await runnerLinux._createRunnableConfiguration();
+                }
+                catch (err) {
+                    isErrorThrown = true;
+                }
+
+                expect(isErrorThrown).to.be.false;
             });
         });
 
@@ -1107,7 +1170,7 @@ describe('Runner', () => {
             await checkQuarantineOptions({ quarantineMode: { attemptLimit: 1 } }, 'The "attemptLimit" parameter only accepts values of 2 and up.');
             await checkQuarantineOptions({ quarantineMode: { attemptLimit: 0 } }, 'The "attemptLimit" parameter only accepts values of 2 and up.');
             await checkQuarantineOptions({ quarantineMode: { successThreshold: 0 } }, 'The "successThreshold" parameter only accepts values of 1 and up.');
-            await checkQuarantineOptions({ quarantineMode: { test: '1' } }, 'The "quarantineMode" option does not exist. Specify "attemptLimit" and "successThreshold" to configure quarantine mode.');
+            await checkQuarantineOptions({ quarantineMode: { test: '1' } }, 'The "test" option does not exist. Specify "attemptLimit" and "successThreshold" to configure quarantine mode.');
 
             expect(errorCount).eql(6);
         });
@@ -1132,6 +1195,85 @@ describe('Runner', () => {
             await del(runner.configuration.defaultPaths);
 
             expect(runner.configuration.getOption('quarantineMode')).eql(quarantineMode);
+        });
+
+        it('Should raise an error if testRun.globalBefore is not a function', async function () {
+            try {
+                await runner
+                    .browsers(connection)
+                    .src('test/server/data/test-suites/basic/testfile2.js')
+                    .run({
+                        hooks: {
+                            testRun: {
+                                before: 'yo',
+                            }
+                            ,
+                        },
+                    });
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                expect(err.message).eql('Cannot prepare tests due to the following error:\n\n' +
+                                            'The testRun.globalBefore hook (string) is not of expected type (function).');
+            }
+        });
+
+        it('Should raise an error if testRun.after is not a function', async function () {
+            try {
+                await runner
+                    .browsers(connection)
+                    .src('test/server/data/test-suites/basic/testfile2.js')
+                    .run({
+                        hooks: {
+                            testRun: {
+                                after: 'yo',
+                            }
+                            ,
+                        },
+                    });
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                expect(err.message).eql('Cannot prepare tests due to the following error:\n\n' +
+                                        'The testRun.globalAfter hook (string) is not of expected type (function).');
+            }
+        });
+
+        it('Should raise an error if customActions property belongs to invalid type', async function () {
+            try {
+                await runner
+                    .browsers(connection)
+                    .src('test/server/data/test-suites/basic/testfile2.js')
+                    .run({
+                        customActions: 'string',
+                    });
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                expect(err.message).eql('The value of the customActions option does not belong to type Object. Refer to the following article for custom action setup instructions: https://testcafe.io/documentation/404150/guides/advanced-guides/custom-test-actions');
+            }
+        });
+
+        it('Should raise an error if some of custom actions belongs to invalid type', async function () {
+            try {
+                await runner
+                    .browsers(connection)
+                    .src('test/server/data/test-suites/basic/testfile2.js')
+                    .run({
+                        customActions: {
+                            makeCoffee () { },
+                            makeTea: 'string',
+                        },
+                    });
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                expect(err.message).eql('TestCafe cannot parse the "makeTea" action, because the action definition is invalid. Format the definition in accordance with the custom actions guide: https://testcafe.io/documentation/404150/guides/advanced-guides/custom-test-actions');
+            }
         });
     });
 
@@ -1238,7 +1380,6 @@ describe('Runner', () => {
         const MockBrowserProvider = {
             openBrowser (browserId, pageUrl) {
                 const options = {
-                    url:            pageUrl,
                     followRedirect: false,
                     headers:        {
                         'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 ' +
@@ -1246,7 +1387,7 @@ describe('Runner', () => {
                     },
                 };
 
-                request(options);
+                fetch(pageUrl, options);
 
                 return Promise.resolve();
             },
@@ -1308,7 +1449,9 @@ describe('Runner', () => {
             Task.prototype.abort              = origAbort;
         });
 
-        it('Should not stop the task until local connection browsers are not closed when task done', () => {
+        it('Should not stop the task until local connection browsers are not closed when task done', function () {
+            this.timeout(100000);
+
             return runner
                 .browsers('mock:browser-alias1', 'mock:browser-alias2')
                 .run()
@@ -1418,16 +1561,18 @@ describe('Runner', () => {
         await runner
             .src('/path-to-test')
             .browsers('remote')
-            .reporter('json')
-            ._applyOptions();
+            .reporter('json');
+        await runner._setConfigurationOptions();
+        await runner._setBootstrapperOptions();
 
         runner.apiMethodWasCalled.reset();
 
         await runner
             .src([])
             .browsers([])
-            .reporter([])
-            ._applyOptions();
+            .reporter([]);
+        await runner._setConfigurationOptions();
+        await runner._setBootstrapperOptions();
 
         expect(runner.configuration.getOption('src')).eql(['/path-to-test']);
         expect(runner.configuration.getOption('browsers')).to.be.an('array').that.not.empty;
@@ -1435,7 +1580,7 @@ describe('Runner', () => {
         expect(runner.configuration.getOption('reporter')).eql([{ name: 'json', output: void 0 }]);
     });
 
-    describe('"Unable to establish one or more of the specifed browser connections" error message', function () {
+    describe('"Unable to establish one or more of the specified browser connections" error message', function () {
         const warningProvider = {
             openBrowser (browserId, _, browserName) {
                 this.reportWarning(browserId, `some warning from "${browserName}"`);
@@ -1491,16 +1636,16 @@ describe('Runner', () => {
                         'Hints:\n' +
                         '- some warning from "browser-alias1"\n' +
                         '- some warning from "browser-alias2"\n' +
-                        '- Increase the value of the "browserInitTimeout" option if it is too low ' +
+                        '- Increase the Browser Initialization Timeout if its value is too low ' +
                         '(currently: 2 minutes for local browsers and 6 minutes for remote browsers). ' +
-                        'This option determines how long TestCafe waits for browsers to be ready.\n' +
+                        'The timeout determines how long TestCafe waits for browsers to be ready.\n' +
                         '- The error can also be caused by network issues or remote device failure. ' +
                         'Make sure that your network connection is stable and you can reach the remote device.'
                     );
                 });
         });
 
-        it('Should include hint about used concurrency factor if it\'s greater than 3', function () {
+        it("Should include hint about used concurrency factor if it's greater than 3", function () {
             return runner
                 .src('./test/server/data/test-suites/basic/testfile1.js')
                 .browsers(['warningProvider:browser-alias1'])
@@ -1511,7 +1656,7 @@ describe('Runner', () => {
                 })
                 .catch(err => {
                     expect(err.message).contains('The host machine may not be powerful enough to handle the specified concurrency factor (4). ' +
-                                                 'Try to decrease the concurrency factor or allocate more computing resources to the host machine.');
+                                                 'Decrease the concurrency factor or allocate more computing resources to the host machine.');
                 });
         });
     });

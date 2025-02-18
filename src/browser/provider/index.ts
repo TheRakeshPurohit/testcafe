@@ -3,7 +3,7 @@ import browserTools from 'testcafe-browser-tools';
 import OS from 'os-family';
 import { dirname } from 'path';
 import makeDir from 'make-dir';
-import BrowserConnection from '../connection';
+import BrowserConnection, { BrowserClosingInfo } from '../connection';
 import delay from '../../utils/delay';
 import {
     GET_IS_SERVICE_WORKER_ENABLED,
@@ -13,9 +13,12 @@ import {
 import WARNING_MESSAGE from '../../notifications/warning-message';
 import { Dictionary } from '../../configuration/interfaces';
 import { WindowDimentionsInfo } from '../interfaces';
-import { CallsiteRecord } from 'callsite-record';
-import { ExecuteClientFunctionCommand, ExecuteSelectorCommand } from '../../test-run/commands/observation';
-import { SwitchToIframeCommand } from '../../test-run/commands/actions';
+import getLocalOSInfo, { OSInfo } from 'get-os-info';
+import { OpenBrowserAdditionalOptions } from '../../shared/types';
+import { EventType } from '../../native-automation/types';
+import { NativeAutomationBase } from '../../native-automation';
+import remoteChrome from 'chrome-remote-interface';
+
 
 const DEBUG_LOGGER = debug('testcafe:browser:provider');
 
@@ -182,7 +185,7 @@ export default class BrowserProvider {
             try {
                 windowDescriptor = await this._findWindow(browserId);
             }
-            catch (err) {
+            catch (err: any) {
                 // NOTE: We can suppress the error here since we can just disable window manipulation functions
                 // when we cannot find a local window descriptor
                 DEBUG_LOGGER(err);
@@ -313,8 +316,15 @@ export default class BrowserProvider {
         return this.plugin.isHeadlessBrowser(browserId, browserName);
     }
 
-    public async openBrowser (browserId: string, pageUrl: string, browserOption: unknown, disableMultipleWindows: boolean, proxyless: boolean): Promise<void> {
-        await this.plugin.openBrowser(browserId, pageUrl, browserOption, disableMultipleWindows, proxyless);
+    public async getOSInfo (browserId: string): Promise<OSInfo | null> {
+        if (await this.isLocalBrowser(browserId))
+            return await getLocalOSInfo();
+
+        return await this.plugin.getOSInfo(browserId);
+    }
+
+    public async openBrowser (browserId: string, pageUrl: string, browserOption: unknown, additionalOptions: OpenBrowserAdditionalOptions): Promise<void> {
+        await this.plugin.openBrowser(browserId, pageUrl, browserOption, additionalOptions);
 
         await this._ensureRetryTestPagesWarning(browserId);
 
@@ -322,14 +332,14 @@ export default class BrowserProvider {
             await this._ensureBrowserWindowParameters(browserId);
     }
 
-    public async closeBrowser (browserId: string): Promise<void> {
+    public async closeBrowser (browserId: string, data: BrowserClosingInfo): Promise<void> {
         const canUseDefaultWindowActions = await this.canUseDefaultWindowActions(browserId);
         const customActionsInfo          = await this.hasCustomActionForBrowser(browserId);
         const hasCustomCloseBrowser      = customActionsInfo.hasCloseBrowser;
         const usePluginsCloseBrowser     = hasCustomCloseBrowser || !canUseDefaultWindowActions;
 
         if (usePluginsCloseBrowser)
-            await this.plugin.closeBrowser(browserId);
+            await this.plugin.closeBrowser(browserId, data);
         else
             await this._closeLocalBrowser(browserId);
 
@@ -345,11 +355,15 @@ export default class BrowserProvider {
         return await this.plugin.isValidBrowserName(browserName);
     }
 
-    public async resizeWindow (browserId: string, width: number, height: number, currentWidth: number, currentHeight: number): Promise<void> {
+    public async resizeWindow (browserId: string, width: number, height: number, currentWidth: number, currentHeight: number, isNativeAutomation: boolean): Promise<void> {
         const canUseDefaultWindowActions = await this.canUseDefaultWindowActions(browserId);
         const customActionsInfo          = await this.hasCustomActionForBrowser(browserId);
         const hasCustomResizeWindow      = customActionsInfo.hasResizeWindow;
 
+        if (canUseDefaultWindowActions && !hasCustomResizeWindow && isNativeAutomation) {
+            await this.plugin.resizeWindowNativeAutomation(browserId, width, height, currentWidth, currentHeight);
+            return;
+        }
 
         if (canUseDefaultWindowActions && !hasCustomResizeWindow) {
             await this._resizeLocalBrowserWindow(browserId, width, height, currentWidth, currentHeight);
@@ -371,10 +385,13 @@ export default class BrowserProvider {
         return await this.plugin.canResizeWindowToDimensions(browserId, width, height);
     }
 
-    public async maximizeWindow (browserId: string): Promise<void> {
+    public async maximizeWindow (browserId: string, isNativeAutomation: boolean): Promise<void> {
         const canUseDefaultWindowActions = await this.canUseDefaultWindowActions(browserId);
         const customActionsInfo          = await this.hasCustomActionForBrowser(browserId);
         const hasCustomMaximizeWindow    = customActionsInfo.hasMaximizeWindow;
+
+        if (canUseDefaultWindowActions && !hasCustomMaximizeWindow && isNativeAutomation)
+            return await this.plugin.maximizeWindowNativeAutomation(browserId);
 
         if (canUseDefaultWindowActions && !hasCustomMaximizeWindow)
             return await this._maximizeLocalBrowserWindow(browserId);
@@ -404,24 +421,16 @@ export default class BrowserProvider {
             await this.plugin.takeScreenshot(browserId, screenshotPath, pageWidth, pageHeight, fullPage);
     }
 
-    public async executeClientFunction (browserId: string, command: ExecuteClientFunctionCommand, callsite: CallsiteRecord): Promise<any> {
-        return this.plugin.executeClientFunction(browserId, command, callsite);
-    }
-
-    public async executeSelector (browserId: string, command: ExecuteSelectorCommand, callsite: CallsiteRecord, selectorTimeout: number): Promise<any> {
-        return this.plugin.executeSelector({ browserId, command, callsite, selectorTimeout });
-    }
-
-    public async switchToIframe (browserId: string, command: SwitchToIframeCommand, callsite: CallsiteRecord, selectorTimeout: number): Promise<void> {
-        return this.plugin.switchToIframe({ browserId, command, callsite, selectorTimeout });
-    }
-
-    public switchToMainWindow (browserId: string): Promise<void> {
-        return this.plugin.switchToMainWindow(browserId);
-    }
-
     public async getVideoFrameData (browserId: string): Promise<any> {
         return this.plugin.getVideoFrameData(browserId);
+    }
+
+    public async startCapturingVideo (browserId: string): Promise<void> {
+        await this.plugin.startCapturingVideo(browserId);
+    }
+
+    public async stopCapturingVideo (browserId: string): Promise<void> {
+        await this.plugin.stopCapturingVideo(browserId);
     }
 
     public async hasCustomActionForBrowser (browserId: string): Promise<any> {
@@ -439,7 +448,50 @@ export default class BrowserProvider {
         return this.plugin.getActiveWindowId(browserId);
     }
 
+    public resetActiveWindowId (browserId: string): string | null {
+        if (!this.plugin.supportMultipleWindows)
+            return null;
+
+        return this.plugin.resetActiveWindowId(browserId);
+    }
+
+    public getNewActiveWindowId (browserId: string): string | null {
+        return this.plugin.getNewActiveWindowId(browserId);
+    }
+
     public setActiveWindowId (browserId: string, val: string): void {
         this.plugin.setActiveWindowId(browserId, val);
+    }
+
+    public async openFileProtocol (browserId: string, url: string): Promise<void> {
+        await this.plugin.openFileProtocol(browserId, url);
+    }
+
+    public async closeBrowserChildWindow (browserId: string, windowId: string): Promise<void> {
+        await this.plugin.closeBrowserChildWindow(browserId, windowId);
+    }
+
+    public async dispatchNativeAutomationEvent (browserId: string, type: EventType, options: any): Promise<void> {
+        await this.plugin.dispatchNativeAutomationEvent(browserId, type, options);
+    }
+
+    public async dispatchNativeAutomationEventSequence (browserId: string, sequence: []): Promise<void> {
+        await this.plugin.dispatchNativeAutomationEventSequence(browserId, sequence);
+    }
+
+    public supportNativeAutomation (): boolean {
+        return this.plugin.supportNativeAutomation();
+    }
+
+    public getNativeAutomation (browserId: string): NativeAutomationBase {
+        return this.plugin.getNativeAutomation(browserId);
+    }
+
+    public async getCurrentCDPSession (browserId: string): Promise<remoteChrome.ProtocolApi | null> {
+        return this.plugin.getCurrentCDPSession(browserId);
+    }
+
+    public getNewWindowIdInNativeAutomation (browserId: string, windowId: string): Promise<void> {
+        return this.plugin.getNewWindowIdInNativeAutomation(browserId, windowId);
     }
 }

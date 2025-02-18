@@ -23,6 +23,7 @@ const arrayUtils   = testCafeCore.arrayUtils;
 
 
 const STATUS_BAR_CLASS                     = 'status-bar';
+const STATUS_BAR_DEBUGGING_CLASS           = 'status-bar-debugging';
 const ICON_CLASS                           = 'icon';
 const INFO_CONTAINER_CLASS                 = 'info-container';
 const INFO_TEXT_CONTAINER_CLASS            = 'info-text-container';
@@ -60,15 +61,16 @@ const ANIMATION_UPDATE_INTERVAL            = 10;
 const LOCAL_STORAGE_STATUS_PREFIX_ITEM     = '%testCafeStatusPrefix%';
 
 export default class StatusBar extends serviceUtils.EventEmitter {
-    constructor (userAgent, fixtureName, testName, contextStorage) {
+    constructor (userAgent, fixtureName, testName, contextStorage, nativeAutomation) {
         super();
 
         this.UNLOCK_PAGE_BTN_CLICK = 'testcafe|ui|status-bar|unlock-page-btn-click';
 
-        this.userAgent      = userAgent;
-        this.fixtureName    = fixtureName;
-        this.testName       = testName;
-        this.contextStorage = contextStorage;
+        this.userAgent        = userAgent;
+        this.fixtureName      = fixtureName;
+        this.testName         = testName;
+        this.contextStorage   = contextStorage;
+        this.nativeAutomation = nativeAutomation;
 
         this.statusBar        = null;
         this.infoContainer    = null;
@@ -85,6 +87,7 @@ export default class StatusBar extends serviceUtils.EventEmitter {
         this.showingTimeout    = null;
 
         this.windowHeight = document.documentElement ? styleUtils.getHeight(window) : window.innerHeight;
+        this.maxHeight    = 0;
 
         this.state = {
             created:          false,
@@ -100,6 +103,12 @@ export default class StatusBar extends serviceUtils.EventEmitter {
 
         this._createBeforeReady();
         this._initChildListening();
+    }
+
+    get visibleHeight () {
+        this.maxHeight = Math.max(this.maxHeight, styleUtils.getHeight(this.statusBar));
+
+        return this.maxHeight;
     }
 
     _createButton (text, className) {
@@ -217,7 +226,7 @@ export default class StatusBar extends serviceUtils.EventEmitter {
         this.progressBar.indeterminateIndicator.start();
         this.progressBar.show();
 
-        uiRoot.element().appendChild(this.statusBar);
+        uiRoot.panelsContainer().appendChild(this.statusBar);
 
         this._bindHandlers();
 
@@ -300,13 +309,11 @@ export default class StatusBar extends serviceUtils.EventEmitter {
             this.windowHeight = window.innerHeight;
         });
 
-        const statusBarHeight = styleUtils.getHeight(this.statusBar);
-
         listeners.addFirstInternalEventBeforeListener(window, ['mousemove', 'mouseout', 'touchmove'], e => {
             if (e.type === 'mouseout' && !e.relatedTarget)
                 this._fadeIn(e);
             else if (e.type === 'mousemove' || e.type === 'touchmove') {
-                if (e.clientY > this.windowHeight - statusBarHeight)
+                if (e.clientY > this.windowHeight - this.visibleHeight)
                     this._fadeOut(e);
                 else if (this.state.hidden)
                     this._fadeIn(e);
@@ -315,7 +322,7 @@ export default class StatusBar extends serviceUtils.EventEmitter {
     }
 
     _bindClickOnce (elements, handler) {
-        const eventName = featureDetection.isTouchDevice ? 'touchstart' : 'mousedown';
+        const eventName = !this.nativeAutomation && featureDetection.isTouchDevice ? 'touchstart' : 'mousedown';
 
         const downHandler = e => {
             const target          = nativeMethods.eventTargetGetter.call(e);
@@ -355,6 +362,8 @@ export default class StatusBar extends serviceUtils.EventEmitter {
 
     _resetState () {
         this.state.debugging = false;
+
+        shadowUI.removeClass(uiRoot.panelsContainer(), STATUS_BAR_DEBUGGING_CLASS);
 
         this.actionsContainer.style.display = 'none';
         this.unlockButton.style.display     = 'none';
@@ -402,6 +411,8 @@ export default class StatusBar extends serviceUtils.EventEmitter {
         return new Promise(resolve => {
             this.state.debugging = true;
             this.state.locked    = true;
+
+            shadowUI.addClass(uiRoot.panelsContainer(), STATUS_BAR_DEBUGGING_CLASS);
 
             if (isTestError) {
                 this.buttons.removeChild(this.nextButton);

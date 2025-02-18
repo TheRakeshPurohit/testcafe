@@ -1,8 +1,9 @@
 const path           = require('path');
 const createTestCafe = require('../../../../../lib');
 const config         = require('../../../config.js');
+const osFamily       = require('os-family');
 
-if (config.useLocalBrowsers && !config.useHeadlessBrowsers) {
+if (config.useLocalBrowsers && !config.useHeadlessBrowsers && !config && !osFamily.mac) {
     describe('[Regression](GH-3929) - Should reconnect with bad network conditions', function () {
         this.timeout(60000);
 
@@ -17,7 +18,7 @@ if (config.useLocalBrowsers && !config.useHeadlessBrowsers) {
                     return testCafe.createRunner()
                         .browsers(`chrome`)
                         .src(path.join(__dirname, './testcafe-fixtures/index.js'))
-                        .run();
+                        .run({ disableNativeAutomation: !config.nativeAutomation });
                 })
                 .then(failed => {
                     failedCount = failed;

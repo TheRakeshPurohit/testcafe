@@ -8,15 +8,16 @@ describe('[API] Generic errors', function () {
             return runTests('./testcafe-fixtures/unsupported-protocol-test.js', 'Test',
                 { shouldFail: true, only: 'chrome' })
                 .catch(function (err) {
-                    expect(err.message).contains('The "mail://testcafe@devexpress.io" test page URL includes an unsupported mail:// protocol. TestCafe only supports http://, https:// and file:// protocols.');
+                    expect(err.message).contains('Invalid test page URL: "mail://testcafe@devexpress.io". TestCafe cannot execute the test because the test page URL includes the mail protocol. TestCafe ' +
+                        'supports the following protocols: http://, https:// and file://.');
                 });
         });
 
         it('Should handle the relative path in the Role constructor', () => {
             return runTests('testcafe-fixtures/role-initialized-with-relative-url.js', null,
                 { shouldFail: true, only: 'chrome' })
-                .catch(err => {
-                    expect(err.message).contains('You cannot specify relative login page URLs in the Role constructor. Use an absolute URL.');
+                .catch(errs => {
+                    expect(errs[0]).contains('Your Role includes a relative login page URL, but the "baseUrl" option is not set.');
                 });
         });
 
@@ -42,6 +43,14 @@ describe('[API] Generic errors', function () {
                 { shouldFail: true, only: 'chrome' })
                 .catch(function (errs) {
                     expect(errs[0]).contains('Uncaught object "null" was thrown. Throw Error instead.');
+                });
+        });
+
+        it('Should handle object thrown by test code', function () {
+            return runTests('./testcafe-fixtures/error-in-test-code-test.js', 'Test code throws object',
+                { shouldFail: true, only: 'chrome' })
+                .catch(function (errs) {
+                    expect(errs[0]).contains('Uncaught object "{"test":"test"}" was thrown. Throw Error instead.');
                 });
         });
 

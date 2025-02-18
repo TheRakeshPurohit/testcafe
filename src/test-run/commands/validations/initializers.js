@@ -1,12 +1,19 @@
 import SelectorBuilder from '../../../client-functions/selectors/selector-builder';
 import { ActionSelectorError } from '../../../errors/test-run';
 import { APIError } from '../../../errors/runtime';
-import { ExecuteSelectorCommand } from '../observation';
+import { ExecuteSelectorCommand } from '../execute-client-function';
 import { executeJsExpression } from '../../execute-js-expression';
 import { isJSExpression } from '../utils';
 
 export function initUploadSelector (name, val, initOptions) {
     initOptions.skipVisibilityCheck = true;
+
+    return initSelector(name, val, initOptions);
+}
+
+export function initTypeSelector (name, val, initOptions) {
+    initOptions.needError   = true;
+    initOptions.strictError = true;
 
     return initSelector(name, val, initOptions);
 }
@@ -26,7 +33,7 @@ export function initSelector (name, val, { testRun, ...options }) {
             ...builderOptions,
         }, { instantiation: 'Selector' });
 
-        return builder.getCommand([]);
+        return builder.getCommand();
     }
     catch (err) {
         throw new ActionSelectorError(name, err, err instanceof APIError);

@@ -5,10 +5,10 @@ const assertionHelper            = require('../../assertion-helper.js');
 const { GREEN_PIXEL, RED_PIXEL } = require('../../assertion-helper');
 const { readPngFile }            = require('../../../../lib/utils/promisified-functions');
 const config                     = require('../../config');
+const { createWarningReporter }  = require('../../utils/warning-reporter');
+const { skipInNativeAutomation } = require('../../utils/skip-in');
 
 const SCREENSHOTS_PATH = config.testScreenshotsDir;
-
-const experimentalDebug = !!process.env.EXPERIMENTAL_DEBUG;
 
 let testCafeInstance = null;
 
@@ -22,6 +22,22 @@ async function assertScreenshotColor (fileName, pixel) {
 }
 
 describe('Multiple windows', () => {
+    let origRunTests = null;
+
+    before(() => {
+        origRunTests = global.runTests;
+
+        global.runTests = (fixture, testName, opts = {}) => {
+            opts.experimentalMultipleWindows = true;
+
+            return origRunTests.call(this, fixture, testName, opts);
+        };
+    });
+
+    after(() => {
+        global.runTests = origRunTests;
+    });
+
     describe('Switch to the child window', () => {
         it('Click on link', () => {
             return runTests('testcafe-fixtures/switching-to-child/click-on-link.js', null, { only: 'chrome' });
@@ -50,7 +66,7 @@ describe('Multiple windows', () => {
         });
     });
 
-    describe('Cookie synchonization', () => {
+    describe('Cookie synchronization', () => {
         it('cross-domain', () => {
             return runTests('testcafe-fixtures/cookie-synchronization/cross-domain.js', null, { only: 'chrome' });
         });
@@ -82,7 +98,7 @@ describe('Multiple windows', () => {
                 return testCafeInstance.createRunner()
                     .browsers(`chrome:headless`)
                     .src(fullTestPath)
-                    .run();
+                    .run({ disableNativeAutomation: !config.nativeAutomation, experimentalMultipleWindows: true });
             })
             .then(() => {
                 return testCafeInstance.close();
@@ -103,17 +119,15 @@ describe('Multiple windows', () => {
         return runTests('testcafe-fixtures/cookie-synchronization/same-domain.js', null, { only: 'chrome' });
     });
 
-    if (!experimentalDebug) {
-        it('Should continue debugging when a child window closes', () => {
-            // NOTE: This test imitates the user clicks for TestCafe's debug UI.
-            // This scenario is not suitable for a run in compiler service due to
-            // the compiler service tests execute in the headless chrome
-            // and TestCafe's debug UI is not visible for end-user.
-            return runTests('testcafe-fixtures/debug-synchronization.js', null, { only: 'chrome' });
-        });
-    }
+    it('Should continue debugging when a child window closes', () => {
+        // NOTE: This test imitates the user clicks for TestCafe's debug UI.
+        // This scenario is not suitable for a run in compiler service due to
+        // the compiler service tests execute in the headless chrome
+        // and TestCafe's debug UI is not visible for end-user.
+        return runTests('testcafe-fixtures/debug-synchronization.js', null, { only: 'chrome' });
+    });
 
-    it('Should make screenshots of different windows', () => {
+    skipInNativeAutomation('Should make screenshots of different windows', () => {
         return runTests('testcafe-fixtures/features/screenshots.js', null, { setScreenshotPath: true })
             .then(() => {
                 return assertScreenshotColor('0.png', RED_PIXEL);
@@ -141,6 +155,24 @@ describe('Multiple windows', () => {
             .catch(errs => {
                 expect(errs[0]).to.contain('Failed to restore connection to window within the allocated timeout.');
             });
+    });
+
+    skipInNativeAutomation('Should switch to parent and close window if the file was downloaded in separate window', () => {
+        return runTests('testcafe-fixtures/i6242.js', null, { only: 'chrome' });
+    });
+
+    it('Should switch to child window if parent page has proxied image', () => {
+        return runTests('testcafe-fixtures/i6680.js');
+    });
+
+    it('Should not hang if switching to a window from iframe', () => {
+        return runTests('testcafe-fixtures/i6085.js');
+    });
+
+    skipInNativeAutomation('Should not hang on close window while video is recording', () => {
+        return runTests('testcafe-fixtures/i6037.js', '', {
+            setVideoPath: true,
+        });
     });
 
     describe('API', () => {
@@ -191,17 +223,20 @@ describe('Multiple windows', () => {
         });
 
         it('Multiple windows are found warning', () => {
-            return runTests('testcafe-fixtures/api/api-test.js', 'Multiple windows are found warning', { only: 'chrome' })
+            const { reporter, assertReporterWarnings, warningResult } = createWarningReporter();
+
+            return runTests('testcafe-fixtures/api/api-test.js', 'Multiple windows are found warning', { only: 'chrome', reporter })
                 .then(() => {
-                    expect(testReport.warnings.length).eql(1);
-                    expect(testReport.warnings[0]).eql('The predicate function passed to the \'switchToWindow\' method matched multiple windows. The first matching window was activated.');
+                    expect(warningResult.warnings.length).eql(1);
+                    expect(warningResult.warnings[0].message).eql('The predicate function passed to the \'switchToWindow\' method matched multiple windows. The first matching window was activated.');
+                    assertReporterWarnings('switchToWindow');
                 });
         });
 
         it('Switch to window by predicate with error', () => {
             return runTests('testcafe-fixtures/api/api-test.js', 'Switch to window by predicate with error', { only: 'chrome', shouldFail: true })
                 .catch(errs => {
-                    expect(errs[0]).to.contain('An error occurred inside the "switchToWindow" argument function.  Error details: Cannot read property \'field\' of undefined');
+                    expect(errs[0]).to.contain('An error occurred inside the "switchToWindow" argument function.  Error details: Cannot read properties of undefined (reading \'field\')  [[user-agent]]');
                 });
         });
 
@@ -323,7 +358,7 @@ describe('Multiple windows', () => {
     });
 
     describe('Emulation', () => {
-        it('Should resize window when emulating device', async () => {
+        skipInNativeAutomation('Should resize window when emulating device', async () => {
             return createTestCafe('127.0.0.1', 1335, 1336)
                 .then(tc => {
                     testCafeInstance = tc;
@@ -333,7 +368,7 @@ describe('Multiple windows', () => {
                         .createRunner()
                         .src(path.join(__dirname, './testcafe-fixtures/features/emulation.js'))
                         .browsers('chrome:emulation:device=iphone X')
-                        .run();
+                        .run({ disableNativeAutomation: true });
                 })
                 .then(failedCount => {
                     expect(failedCount).eql(0);
@@ -355,7 +390,7 @@ describe('Multiple windows', () => {
                         .src(path.join(__dirname, './testcafe-fixtures/api/api-test.js'))
                         .filter(testName => testName === 'Resize multiple windows')
                         .browsers(browser)
-                        .run();
+                        .run({ disableNativeAutomation: true });
                 })
                 .then(failedCount => {
                     expect(failedCount).eql(0);
@@ -364,15 +399,15 @@ describe('Multiple windows', () => {
                 });
         }
 
-        it('Resize multiple windows', () => {
+        skipInNativeAutomation('Resize multiple windows', () => {
             return runTests('testcafe-fixtures/api/api-test.js', 'Resize multiple windows');
         });
 
-        it('Maximize multiple windows', () => {
+        skipInNativeAutomation('Maximize multiple windows', () => {
             return runTests('testcafe-fixtures/api/api-test.js', 'Maximize multiple windows');
         });
 
-        it('Resize headless', () => {
+        skipInNativeAutomation('Resize headless', () => {
             return runTestsResize('firefox:headless').then(() => {
                 return runTestsResize('chrome:headless');
             });

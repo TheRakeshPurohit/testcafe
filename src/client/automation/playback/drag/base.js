@@ -5,9 +5,9 @@ import {
     domUtils,
     delay,
 } from '../../deps/testcafe-core';
-import { fromPoint as getElementFromPoint } from '../../get-element';
-import VisibleElementAutomation from '../visible-element-automation';
-import MoveAutomation from '../move';
+import getElementFromPoint from '../../get-element';
+import VisibleElementAutomation from '../../visible-element-automation';
+import DragMoveAutomation from '../move/drag-move';
 import { MoveOptions } from '../../../../test-run/commands/options';
 import cursor from '../../cursor';
 
@@ -22,7 +22,7 @@ const focusBlurSandbox = hammerhead.eventSandbox.focusBlur;
 
 export default class DragAutomationBase extends VisibleElementAutomation {
     constructor (element, mouseOptions) {
-        super(element, mouseOptions);
+        super(element, mouseOptions, window, cursor);
 
         this.modifiers = mouseOptions.modifiers;
         this.speed     = mouseOptions.speed;
@@ -67,24 +67,24 @@ export default class DragAutomationBase extends VisibleElementAutomation {
     }
 
     _drag () {
-        const { element, offsets, endPoint } = this._getDestination();
+        return this._getDestination()
+            .then(({ element, offsets, endPoint }) => {
+                this.endPoint = endPoint;
 
-        this.endPoint = endPoint;
+                const dragOptions = new MoveOptions({
+                    offsetX:                 offsets.offsetX,
+                    offsetY:                 offsets.offsetY,
+                    modifiers:               this.modifiers,
+                    speed:                   this.speed,
+                    minMovingTime:           MIN_MOVING_TIME,
+                    skipDefaultDragBehavior: this.simulateDefaultBehavior === false,
+                }, false);
 
-        const dragOptions = new MoveOptions({
-            offsetX:                 offsets.offsetX,
-            offsetY:                 offsets.offsetY,
-            modifiers:               this.modifiers,
-            speed:                   this.speed,
-            minMovingTime:           MIN_MOVING_TIME,
-            holdLeftButton:          true,
-            skipDefaultDragBehavior: this.simulateDefaultBehavior === false,
-        }, false);
-
-        const moveAutomation = new MoveAutomation(element, dragOptions);
-
-        return moveAutomation
-            .run()
+                return DragMoveAutomation.create(element, dragOptions, window, cursor);
+            })
+            .then(moveAutomation => {
+                return moveAutomation.run();
+            })
             .then(dragAndDropState => {
                 this.dragAndDropState = dragAndDropState;
 
@@ -92,19 +92,19 @@ export default class DragAutomationBase extends VisibleElementAutomation {
             });
     }
 
-    _mouseup () {
+    _mouseup (draggedElement) {
         return cursor
             .buttonUp()
             .then(() => {
-                const point      = positionUtils.offsetToClientCoords(this.endPoint);
+                const point    = positionUtils.offsetToClientCoords(this.endPoint);
                 let topElement = null;
-                const options    = extend({
+                const options  = extend({
                     clientX: point.x,
                     clientY: point.y,
                 }, this.modifiers);
 
-                return getElementFromPoint(point.x, point.y)
-                    .then(({ element }) => {
+                return getElementFromPoint(point)
+                    .then(element => {
                         topElement = element;
 
                         if (!topElement)
@@ -122,11 +122,11 @@ export default class DragAutomationBase extends VisibleElementAutomation {
                         else
                             eventSimulator[this.upEvent](topElement, options);
 
-                        return getElementFromPoint(point.x, point.y);
+                        return getElementFromPoint(point);
                     })
-                    .then(({ element }) => {
+                    .then(element => {
                         //B231323
-                        if (topElement && element === topElement && !this.dragAndDropState.enabled)
+                        if (topElement && element === topElement && !this.dragAndDropState.enabled && element === draggedElement)
                             eventSimulator.click(topElement, options);
                     });
             });
@@ -152,6 +152,6 @@ export default class DragAutomationBase extends VisibleElementAutomation {
                 return Promise.all([delay(this.automationSettings.mouseActionStepDelay), this._mousedown(eventArgs)]);
             })
             .then(() => this._drag())
-            .then(() => this._mouseup());
+            .then(() => this._mouseup(eventArgs.element));
     }
 }

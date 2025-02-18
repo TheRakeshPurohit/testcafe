@@ -1,6 +1,6 @@
 const { assignIn } = require('lodash');
 
-const CLIENT_TEST_LOCAL_BROWSERS_ALIASES = ['ie', 'edge', 'chrome', 'firefox', 'safari'];
+const CLIENT_TEST_LOCAL_BROWSERS_ALIASES = ['edge', 'chrome', 'firefox', 'safari'];
 
 const CLIENT_TESTS_PATH        = 'test/client/fixtures';
 const CLIENT_TESTS_LEGACY_PATH = 'test/client/legacy-fixtures';
@@ -41,31 +41,18 @@ const CLIENT_TESTS_DESKTOP_BROWSERS = [
         browserName: 'firefox',
     },
     {
-        platform:    'Windows 10',
-        browserName: 'internet explorer',
-        version:     '11.0',
-    },
-    {
-        platform:    'macOS 10.13',
+        platform:    'macOS 13',
         browserName: 'safari',
-        version:     '11.1',
-    },
-    {
-        platform:    'OS X 10.11',
-        browserName: 'chrome',
-    },
-    {
-        platform:    'OS X 10.11',
-        browserName: 'firefox',
+        version:     '16',
     },
 ];
 
 const CLIENT_TESTS_MOBILE_BROWSERS = [
     {
-        platform:    'Linux',
-        browserName: 'android',
-        version:     '6.0',
-        deviceName:  'Android Emulator',
+        deviceName:      'Android GoogleAPI Emulator',
+        browserName:     'Chrome',
+        platformVersion: '7.1',
+        platformName:    'Android',
     },
     {
         platform:    'iOS',
@@ -73,8 +60,11 @@ const CLIENT_TESTS_MOBILE_BROWSERS = [
         // NOTE: https://github.com/DevExpress/testcafe/issues/471
         // problem with extra scroll reproduced only on saucelabs
         // virtual machines with ios device emulators
-        version:     '10.3',
-        deviceName:  'iPhone 7 Plus Simulator',
+        deviceName:  'iPhone Simulator',
+        // NOTE: Sauce Labs raises the 'Internal server error'
+        // on using iPhone Simulator with the latest version (15.4)
+        // So, we temporarily downgrade the version to 15.2
+        version:     '15.2',
     },
 ];
 

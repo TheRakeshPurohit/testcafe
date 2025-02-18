@@ -4,6 +4,7 @@ const createTestCafe     = require('../../../../../lib');
 const config             = require('../../../config.js');
 const delay              = require('../../../../../lib/utils/delay');
 const { createReporter } = require('../../../utils/reporter');
+const osFamily           = require('os-family');
 
 let cafe   = null;
 let runner = null;
@@ -40,7 +41,7 @@ const reporter = createReporter({
     },
 });
 
-if (config.useLocalBrowsers && !config.useHeadlessBrowsers) {
+if (config.useLocalBrowsers && !config.useHeadlessBrowsers && !osFamily.mac) {
     describe('[Regression](GH-4787) - Should wait for last report before new fixture starts', function () {
         it('Should wait for last report before new fixture starts', function () {
             return createTestCafe('127.0.0.1', 1335, 1336)
@@ -53,7 +54,7 @@ if (config.useLocalBrowsers && !config.useHeadlessBrowsers) {
                         .src(path.join(__dirname, './testcafe-fixtures/index.js'))
                         .browsers(['chrome', 'firefox'])
                         .reporter(reporter)
-                        .run();
+                        .run({ disableNativeAutomation: !config.nativeAutomation });
                 })
                 .then(() => {
                     return cafe.close();

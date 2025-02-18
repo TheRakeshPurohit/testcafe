@@ -1,6 +1,8 @@
-const os = require('os');
+const os                         = require('os');
+const osFamily                   = require('os-family');
+const { skipInNativeAutomation } = require('../../../../utils/skip-in');
 
-const TRANSPARENT_PROXY_URL = os.hostname() + ':3005';
+const TRANSPARENT_PROXY_URL = (osFamily.mac ? 'localhost' : os.hostname()) + ':3005';
 
 describe('Basic and NTLM authentications', function () {
     it('Should not authenticate on a "basic" server with wrong credentials', function () {
@@ -8,10 +10,15 @@ describe('Basic and NTLM authentications', function () {
     });
 
     it('Should authenticate on a "basic" server with correct credentials', function () {
-        return runTests('./testcafe-fixtures/basic-auth-with-correct-credentials-test.js');
+        return runTests('./testcafe-fixtures/basic-auth-with-correct-credentials-test.js', 'Authenticate with correct credintials');
     });
 
-    it('Should authenticate on a "NTLM" server with correct credentials', function () {
+    it('Should authenticate on a "basic" server with correct credentials and redirect', function () {
+        return runTests('./testcafe-fixtures/basic-auth-with-correct-credentials-test.js', 'Authenticate with correct credintials and redirect');
+    });
+
+    // NOTE: NTLM authentication is not supported yet
+    skipInNativeAutomation('Should authenticate on a "NTLM" server with correct credentials', function () {
         return runTests('./testcafe-fixtures/ntlm-auth-check-username-test.js');
     });
 
@@ -28,7 +35,8 @@ describe('Basic and NTLM authentications', function () {
             return runTests('./testcafe-fixtures/basic-auth-with-correct-credentials-test.js', null, { useProxy: TRANSPARENT_PROXY_URL });
         });
 
-        it('Should authenticate on a "NTLM" server with correct credentials', function () {
+        // NOTE: NTLM authentication is not supported yet
+        skipInNativeAutomation('Should authenticate on a "NTLM" server with correct credentials', function () {
             return runTests('./testcafe-fixtures/ntlm-auth-check-username-test.js', null, { useProxy: TRANSPARENT_PROXY_URL });
         });
 

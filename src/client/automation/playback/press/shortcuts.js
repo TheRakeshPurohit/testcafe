@@ -491,8 +491,7 @@ function enter (element) {
 
     //submit form on enter pressed
     if (domUtils.isInputElement(element)) {
-        if (!browserUtils.isIE)
-            elementEditingWatcher.processElementChanging(element);
+        elementEditingWatcher.processElementChanging(element);
 
         const form = domUtils.getParents(element, 'form')[0];
 
@@ -518,7 +517,7 @@ function enter (element) {
 }
 
 function isRadioButtonNavigationRequired (element) {
-    return domUtils.isRadioButtonElement(element) && !browserUtils.isFirefox;
+    return domUtils.isRadioButtonElement(element);
 }
 
 function focusAndCheckNextRadioButton (element, reverse) {

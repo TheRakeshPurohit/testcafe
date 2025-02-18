@@ -1,19 +1,26 @@
-const expect               = require('chai').expect;
-const fs                   = require('fs');
-const generateReporter     = require('./reporter');
-const { createReporter }   = require('../../utils/reporter');
-const ReporterPluginMethod = require('../../../../lib/reporter/plugin-methods');
-const assertionHelper      = require('../../assertion-helper.js');
-const path                 = require('path');
-const config               = require('../../config');
+const { expect }                 = require('chai');
+const fs                         = require('fs');
+const path                       = require('path');
+const { noop }                   = require('lodash');
+const generateReporter           = require('./reporter');
+const { createReporter }         = require('../../utils/reporter');
+const { createWarningReporter }  = require('../../utils/warning-reporter');
+const ReporterPluginMethod       = require('../../../../lib/reporter/plugin-methods');
+const assertionHelper            = require('../../assertion-helper.js');
+const config                     = require('../../config');
+const { skipInNativeAutomation } = require('../../utils/skip-in');
+const getTestCafeVersion         = require('../../../../lib/utils/get-testcafe-version');
 
 const {
     createSimpleTestStream,
     createAsyncTestStream,
     createSyncTestStream,
-} = require('../../utils/stream');
+}                        = require('../../utils/stream');
+const runTestsWithConfig = require('../../utils/run-tests-with-config');
+const del                = require('del');
 
-describe('Reporter', () => {
+
+(config.hasBrowser('chrome') ? describe : describe.skip)('Reporter', () => {
     const stdoutWrite = process.stdout.write;
     const stderrWrite = process.stderr.write;
 
@@ -601,7 +608,7 @@ describe('Reporter', () => {
         it('Should not add action information in report if action was emitted after test done (GH-5650)', () => {
             return runTests('testcafe-fixtures/index-test.js', 'Action done after test done', generateRunOptions(log))
                 .then(() => {
-                    expect(log).eql([
+                    const EXPECTED_LOG = [
                         { name: 'execute-client-function', action: 'start' },
                         { name: 'wait', action: 'start' },
                         {
@@ -615,7 +622,9 @@ describe('Reporter', () => {
                                 },
                             },
                         },
-                    ]);
+                    ];
+
+                    expect(log).eql(EXPECTED_LOG);
                 });
         });
 
@@ -660,7 +669,7 @@ describe('Reporter', () => {
             return runTests(
                 'testcafe-fixtures/index-test.js',
                 'The "typeText" action with the input[type=text] and the "confidential" flag set to true',
-                { reporter: generateReporter(log, { includeCommandInfo: true }) }
+                { reporter: generateReporter(log, { includeCommandInfo: true }) },
             ).then(() => {
                 expect(log).to.include.deep.members([
                     {
@@ -828,39 +837,134 @@ describe('Reporter', () => {
                 ]);
             });
         });
+
+        it('Should repeat role error in each tests', function () {
+            return runTests('testcafe-fixtures/index-test.js', 'Repeated role error', generateRunOptions(log))
+                .then(() => {
+                    expect(log).eql([
+                        { name: 'useRole', action: 'start' },
+                        { name: 'click', action: 'start' },
+                        {
+                            name:    'click',
+                            action:  'done',
+                            command: {
+                                selector: 'Selector(\'#non-existing-element\')',
+                                type:     'click',
+                            },
+                            err: 'E24',
+                        },
+                        {
+                            name:    'useRole',
+                            action:  'done',
+                            command: {
+                                role: {
+                                    loginUrl: 'http://localhost:3000/fixtures/reporter/pages/index.html',
+                                    options:  { 'preserveUrl': false },
+                                    phase:    'initialized',
+                                },
+                                type: 'useRole',
+                            },
+                        },
+                        { name: 'useRole', action: 'start' },
+                        {
+                            name:    'useRole',
+                            action:  'done',
+                            command: {
+                                role: {
+                                    loginUrl: 'http://localhost:3000/fixtures/reporter/pages/index.html',
+                                    options:  { 'preserveUrl': false },
+                                    phase:    'initialized',
+                                },
+                                type: 'useRole',
+                            },
+                            err: 'E24',
+                        },
+                    ]);
+                });
+        });
+    });
+
+    describe('Report Data', () => {
+        let reportDataInfos = {};
+        let testDoneInfos   = {};
+        let reporter        = null;
+
+        const createReportDataReporter = () => {
+            return createReporter({
+                reportData: ({ browser }, ...data) => {
+                    const alias = browser.alias;
+
+                    if (!reportDataInfos[alias])
+                        reportDataInfos[alias] = [];
+
+                    reportDataInfos[alias].push(data);
+                },
+                reportTestDone: (name, { reportData, browsers }) => {
+                    browsers.forEach(({ testRunId, alias }) => {
+                        testDoneInfos[alias] = reportData[testRunId];
+                    });
+                },
+            });
+        };
+
+        beforeEach(() => {
+            reportDataInfos = {};
+            testDoneInfos   = {};
+
+            reporter = createReportDataReporter();
+        });
+
+        it('Should raise "reportData" event', async () => {
+            const expectedReportData = [1, true, 'string', { 'reportResult': 'test' }];
+
+            await runTests('testcafe-fixtures/report-data-test.js', 'Run t.report action', {
+                reporter,
+            });
+
+            const reportDataBrowserInfos = Object.entries(reportDataInfos);
+            const testDoneBrowserInfos   = Object.entries(testDoneInfos);
+
+            expect(reportDataBrowserInfos.length).eql(config.browsers.length);
+            expect(testDoneBrowserInfos.length).eql(config.browsers.length);
+
+            reportDataBrowserInfos.forEach(([alias, reportData]) => {
+                expect(reportData.flat()).eql(testDoneInfos[alias]);
+            });
+
+            testDoneBrowserInfos.forEach(([, reportData]) => {
+                const [, ...rest] = reportData;
+
+                expect(rest).eql(expectedReportData);
+            });
+        });
     });
 
     describe('Warnings', () => {
-        let resultWarning = {};
-        const reporter    = createReporter({
-            reportWarnings: (warning) => {
-                resultWarning = warning;
-            },
+        let warningResult          = {};
+        let reporter               = null;
+        let assertReporterWarnings = null;
+
+        beforeEach(() => {
+            ({ reporter, assertReporterWarnings, warningResult } = createWarningReporter());
         });
 
-        afterEach(() => {
-            resultWarning = {};
+        it('Should get warning for TestRun', async () => {
+            try {
+                await runTests('testcafe-fixtures/index-test.js', 'Asynchronous method', {
+                    reporter,
+                    shouldFail: true,
+                });
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                expect(warningResult.warnings[0].message).to.include("An asynchronous method that you do not await includes an assertion. Inspect that method's execution chain and add the 'await' keyword where necessary.");
+                expect(warningResult.warnings[0].testRunId).to.be.a('string');
+                expect(warningResult.warnings[0].testRunId).to.not.empty;
+
+                assertReporterWarnings('ok');
+            }
         });
-
-        if (!config.experimentalDebug) {
-            //TODO: Debug mode loses synchronization with unwaiting async function. This bug need to fix.
-
-            it('Should get warning for TestRun', async () => {
-                try {
-                    await runTests('testcafe-fixtures/index-test.js', 'Asynchronous method', {
-                        reporter,
-                        shouldFail: true,
-                    });
-
-                    throw new Error('Promise rejection expected');
-                }
-                catch (err) {
-                    expect(resultWarning.message).to.include("An asynchronous method that you do not await includes an assertion. Inspect that method's execution chain and add the 'await' keyword where necessary.");
-                    expect(resultWarning.testRunId).to.be.a('string');
-                    expect(resultWarning.testRunId).to.not.empty;
-                }
-            });
-        }
 
         if (config.useLocalBrowsers) {
             it('Should get warning for Task', async () => {
@@ -877,7 +981,7 @@ describe('Reporter', () => {
                     const SCREENSHOTS_PATH   = path.resolve(assertionHelper.SCREENSHOTS_PATH);
                     const screenshotFileName = path.join(SCREENSHOTS_PATH, '1.png');
 
-                    expect(resultWarning.message).to.include(
+                    expect(warningResult.warnings[0].message).to.include(
                         `The file at "${screenshotFileName}" already exists. It has just been rewritten ` +
                         'with a recent screenshot. This situation can possibly cause issues. To avoid them, make sure ' +
                         'that each screenshot has a unique path. If a test runs in multiple browsers, consider ' +
@@ -889,13 +993,16 @@ describe('Reporter', () => {
             });
         }
 
-        it('Should get warning for request hook', async () => {
+        // NOTE: the `event.isSameOriginPolicyFailed` property return `false` in the nativeAutomation mode,
+        // but in the proxy mode it returns `true`
+        // the problem is only with warning log, but not with request mock
+        skipInNativeAutomation('Should get warning for request hook', async () => {
             await runTests('./testcafe-fixtures/failed-cors-validation.js', 'Failed CORS validation', {
                 only: 'chrome',
                 reporter,
             });
 
-            expect(resultWarning.message).to.include('RequestMock: CORS validation failed for a request specified as { url: "http://dummy-url.com/get" }');
+            expect(warningResult.warnings[0].message).to.include('RequestMock: CORS validation failed for a request specified as { url: "http://dummy-url.com/get" }');
         });
 
         it('Should get warning for request hook', async () => {
@@ -905,7 +1012,7 @@ describe('Reporter', () => {
                 tsConfigPath: 'path-to-ts-config',
             });
 
-            expect(resultWarning.message).to.eql("The 'tsConfigPath' option is deprecated and will be removed in the next major release. Use the 'compilerOptions.typescript.configPath' option instead.");
+            expect(warningResult.warnings[0].message).to.eql("The 'tsConfigPath' option is deprecated and will be removed in the next major release. Use the 'compilerOptions.typescript.configPath' option instead.");
         });
     });
 
@@ -1034,11 +1141,189 @@ describe('Reporter', () => {
                     expect(testDoneErrors.map(err => err.code)).eql(['E24', 'E8']);
                     expect(testDoneErrors[0].screenshotPath).is.not.empty;
                     expect(testDoneErrors[0].screenshotPath).eql(testDoneErrors[1].screenshotPath);
+
+                    return assertionHelper.removeScreenshotDir('screenshots');
                 });
+        });
+
+        it('Should put actionId on screenshot information', async () => {
+            function customReporter (actionIds, screenshots) {
+                return createReporter({
+                    reportTestActionDone: async (name, { command }) => {
+                        actionIds.push(command.actionId);
+                    },
+
+                    reportTestDone: async (name, testRunInfo) => {
+                        testRunInfo.screenshots.forEach((screenshot) => {
+                            screenshots[screenshot.actionId] = screenshot.screenshotPath;
+                        });
+                    },
+                });
+            }
+
+            const actionIds   = [];
+            const screenshots = {};
+
+            await runTests('./testcafe-fixtures/index-test.js', 'Take a screenshot on action and on error', {
+                only:               'chrome',
+                reporter:           customReporter(actionIds, screenshots),
+                screenshotsOnFails: true,
+            });
+
+            expect(actionIds.length).eql(2);
+            actionIds.forEach(actionId => {
+                expect(screenshots[actionId]).is.not.empty;
+            });
+
+            assertionHelper.removeScreenshotDir('screenshots');
+        });
+
+    });
+
+    describe('Reporter Hooks', () => {
+        it('Should handle onBeforeWrite hook', () => {
+            const writeData             = { prop: true };
+            const result                = {};
+            const expectedOutput        = `formattedText\nformattedText\nformattedText\n`;
+            const expectedFormatOptions = { indent: 3, useWordWrap: true };
+            const expectedResult = {
+                reportTaskStart: {
+                    data:          writeData,
+                    formatOptions: expectedFormatOptions,
+                },
+                reportTestDone: {
+                    data:          writeData,
+                    formatOptions: expectedFormatOptions,
+                },
+                customMethod: {
+                    data:          { ...writeData, initiator: 'customMethod' },
+                    formatOptions: expectedFormatOptions,
+                },
+            };
+
+            function custom () {
+                return {
+                    reportTaskDone:     noop,
+                    reportFixtureStart: noop,
+                    reportTaskStart () {
+                        this.useWordWrap(true).setIndent(3).write('unFormattedText', writeData);
+                    },
+                    reportTestDone: function () {
+                        this.write('unFormattedText', writeData);
+                        this.customMethod();
+                    },
+                    customMethod () {
+                        this.write('unFormattedText', { ...writeData, initiator: 'customMethod' });
+                    },
+                };
+            }
+
+            const onBeforeWriteHook = function (writeInfo) {
+                const { initiator, data, formatOptions } = writeInfo;
+
+                writeInfo.formattedText = 'formattedText\n';
+                result[initiator]       = {
+                    data,
+                    formatOptions,
+                };
+            };
+            const outStream         = createSimpleTestStream();
+
+            return runTests('testcafe-fixtures/reporter-init-method.js', null, {
+                reporter: [{ name: custom, output: outStream }],
+                hooks:    {
+                    reporter: {
+                        onBeforeWrite: {
+                            'custom': onBeforeWriteHook,
+                        },
+                    },
+                },
+            })
+                .then(() => {
+                    expect(result).eql(expectedResult);
+                    expect(outStream.data).eql(expectedOutput);
+                });
+
+        });
+        it('Should throw an error if hooks.reporter option is not of object type', async () => {
+            try {
+                await runTests('testcafe-fixtures/reporter-init-method.js', null, {
+                    shouldFail: true,
+                    hooks:      {
+                        reporter: {
+                            onBeforeWrite: 'stringTypeHook',
+                        },
+                    },
+                });
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                expect(err.message).eql(`Cannot prepare tests due to the following error:\n\n`
+                    + `The reporter.onBeforeWrite (string) is not of expected type (non-null object).`);
+            }
+
+        });
+        it('Should throw an error if onBeforeWrite hook is not of function type', async () => {
+            try {
+                await runTests('testcafe-fixtures/reporter-init-method.js', null, {
+                    shouldFail: true,
+                    hooks:      {
+                        reporter: {
+                            onBeforeWrite: {
+                                'custom': 'stringTypeHook',
+                            },
+                        },
+                    },
+                });
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                expect(err.message).eql(`Cannot prepare tests due to the following error:\n\n`
+                    + `The reporter.onBeforeWrite.custom (string) is not of expected type (function).`);
+            }
+
         });
     });
 
-    it('Should raise an error when uncaught exception occurred in any reporter method', async () => {
+    it('Should call the "init" method of reporters if it\'s defined', function () {
+        const reportInitSuccess = result => createReporter({
+            init (version) {
+                result.init    = result.init || [];
+                result.version = version;
+
+                result.init.push(true);
+            },
+            reportTaskDone () {
+                result.done = result.done || [];
+
+                result.done.push(true);
+            },
+        });
+
+        const reportNoInit = result => createReporter({
+            reportTaskDone () {
+                result.done = result.done || [];
+
+                result.done.push(true);
+            },
+        });
+
+        const result = {};
+
+        return runTests('testcafe-fixtures/reporter-init-method.js', null, {
+            reporter: [reportInitSuccess(result), reportNoInit(result)],
+        })
+            .then(() => {
+                expect(result.init).eql([true]);
+                expect(result.done).eql([true, true]);
+                expect(result.version).eql(getTestCafeVersion());
+            });
+    });
+
+    // NOTE: this test hangs in nativeAutomation for unknown reasons
+    skipInNativeAutomation('Should raise an error when uncaught exception occurred in any reporter method', async () => {
         function createReporterWithBrokenMethod (method) {
             const base = {
                 async reportTaskStart () {},
@@ -1063,7 +1348,7 @@ describe('Reporter', () => {
                         reporter:     createReporterWithBrokenMethod(method),
                         shouldFail:   true,
                         tsConfigPath: 'path-to-ts-config',
-                    }
+                    },
                 );
 
                 throw new Error('Promise rejection expected');
@@ -1072,5 +1357,54 @@ describe('Reporter', () => {
                 expect(err.message).startsWith(`The "${method}" method of the "function () {}" reporter produced an uncaught error. Error details:\nError: oops`);
             }
         }
+    });
+
+    it('Should work with option from configuration file', function () {
+
+        return runTestsWithConfig('Simple test', './test/functional/fixtures/reporter/configs/xunit-config.js')
+            .then(() => {
+                const pathReport = path.resolve(__dirname, 'report.xml');
+                const report     = fs.readFileSync(pathReport).toString();
+
+                expect(report).contains('<?xml version="1.0" encoding="UTF-8" ?>');
+
+                del(pathReport);
+            });
+    });
+
+    it('Should set options _hasTaskErrors to the runner if an error occurs', async () => {
+        try {
+            await runTests('testcafe-fixtures/index-test.js', 'Simple command err test', { only: ['chrome'], shouldFail: true });
+        }
+        catch (err) {
+            expect(testCafe.runner._hasTaskErrors).eql(true);
+        }
+    });
+
+    it('[gh-7731] Should pass duration 0 for skipped tests', function () {
+        const reportTestDoneReporter = result => createReporter({
+            reportTestDone (name, { durationMs, skipped }) {
+                result.skipped    = result.skipped || [];
+                result.nonSkipped = result.nonSkipped || [];
+
+                if (skipped)
+                    result.skipped.push(durationMs);
+                else
+                    result.nonSkipped.push(durationMs);
+            },
+        });
+
+        const result = {};
+
+        return runTests('testcafe-fixtures/skipped-tests.js', null, {
+            reporter: [reportTestDoneReporter(result)],
+        })
+            .then(() => {
+                expect(result.skipped.length).eql(4);
+                expect(result.nonSkipped.length).eql(1);
+
+                result.skipped.forEach(dur => expect(dur).eql(0));
+                result.nonSkipped.forEach(dur => expect(dur).gt(0));
+            });
     });
 });

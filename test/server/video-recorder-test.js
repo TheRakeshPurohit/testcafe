@@ -1,5 +1,3 @@
-
-
 const { expect }           = require('chai');
 const { noop }             = require('lodash');
 const TestRun              = require('../../lib/test-run/index');
@@ -45,6 +43,10 @@ class TestRunVideoRecorderMock extends TestRunVideoRecorder {
     _createVideoRecorderProcess () {
         return new VideoRecorderProcessMock();
     }
+
+    _addTimeCode () {
+        this.timecodes.push(10);
+    }
 }
 
 class VideoRecorderMock extends VideoRecorder {
@@ -55,6 +57,8 @@ class VideoRecorderMock extends VideoRecorder {
 
         this.warningLog = {
             addWarning: (message, ...args) => {
+                message = typeof message === 'string' ? message : message.message;
+
                 const msg = renderTemplate(message, ...args);
 
                 this.log.push(msg);
@@ -112,8 +116,9 @@ function createTestRunMock (warningLog) {
         opts: { videoPath: 'path' },
 
         browserConnection: {
-            id:       'connectionId',
-            provider: {
+            id:          'connectionId',
+            browserInfo: {},
+            provider:    {
                 hasCustomActionForBrowser: () => {
                     return {
                         hasGetVideoFrameData: true,
@@ -125,7 +130,7 @@ function createTestRunMock (warningLog) {
 
     return {
         testRun,
-        test:  { skip: false },
+        test:  { skip: false, fixture: { name: 'Fixture' } },
         index: 0,
     };
 }
@@ -158,15 +163,17 @@ describe('Video Recorder', () => {
 
         videoRecorder._addProblematicPlaceholdersWarning(['${TEST_INDEX}']);
         expect(warningLog.messages).eql([
-            'The "${TEST_INDEX}" path pattern placeholder cannot be applied to the recorded video.' +
+            'TestCafe could not apply the following video recording save path pattern: "${TEST_INDEX}".\n' +
+            'You may encounter this behavior when you enable the "singleFile" video recording option and use test-specific path patterns.' +
             '\n\n' +
             'The placeholder was replaced with an empty string.',
         ]);
-        warningLog.messages = [];
+        warningLog.messageInfos = [];
 
         videoRecorder._addProblematicPlaceholdersWarning(['${TEST_INDEX}', '${FIXTURE}']);
         expect(warningLog.messages).eql([
-            'The "${TEST_INDEX}" and "${FIXTURE}" path pattern placeholders cannot be applied to the recorded video.' +
+            'TestCafe could not apply the following video recording save path patterns: "${TEST_INDEX}" and "${FIXTURE}".\n' +
+            'You may encounter this behavior when you enable the "singleFile" video recording option and use test-specific path patterns.' +
             '\n\n' +
             'The placeholders were replaced with an empty string.',
         ]);
@@ -265,10 +272,12 @@ describe('Video Recorder', () => {
                     recordings: [{
                         testRunId:  'test-run-1',
                         videoPath:  'path-test-run-1',
+                        timecodes:  [0, 10],
                         singleFile: false,
                     }, {
                         testRunId:  'test-run-2',
                         videoPath:  'path-test-run-2',
+                        timecodes:  [0, 10],
                         singleFile: false,
                     }],
                 },
@@ -276,10 +285,12 @@ describe('Video Recorder', () => {
                     recordings: [{
                         testRunId:  'test-run-3',
                         videoPath:  'path-test-run-3',
+                        timecodes:  [0, 10],
                         singleFile: false,
                     }, {
                         testRunId:  'test-run-4',
                         videoPath:  'path-test-run-4',
+                        timecodes:  [0, 10],
                         singleFile: false,
                     }],
                 },
@@ -289,12 +300,20 @@ describe('Video Recorder', () => {
 
         return browserJobMock.emit('start')
             .then(() => browserJobMock.emit('test-run-create', testRunMock1))
+            .then(() => browserJobMock.emit('test-run-ready', testRunMock1))
+            .then(() => browserJobMock.emit('test-run-restart', testRunMock1))
             .then(() => browserJobMock.emit('test-run-before-done', testRunMock1))
             .then(() => browserJobMock.emit('test-run-create', testRunMock2))
+            .then(() => browserJobMock.emit('test-run-ready', testRunMock2))
+            .then(() => browserJobMock.emit('test-run-restart', testRunMock2))
             .then(() => browserJobMock.emit('test-run-before-done', testRunMock2))
             .then(() => browserJobMock.emit('test-run-create', testRunMock3))
+            .then(() => browserJobMock.emit('test-run-ready', testRunMock3))
+            .then(() => browserJobMock.emit('test-run-restart', testRunMock3))
             .then(() => browserJobMock.emit('test-run-before-done', testRunMock3))
             .then(() => browserJobMock.emit('test-run-create', testRunMock4))
+            .then(() => browserJobMock.emit('test-run-ready', testRunMock4))
+            .then(() => browserJobMock.emit('test-run-restart', testRunMock4))
             .then(() => browserJobMock.emit('test-run-before-done', testRunMock4))
             .then(() => {
                 expect(videos1).eql(expectedLog1);

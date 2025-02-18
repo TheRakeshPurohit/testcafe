@@ -1,10 +1,12 @@
 import dedent from 'dedent';
 import { escape as escapeHtml, repeat } from 'lodash';
+import PREVENT_MODULE_CACHING_SUFFIX from '../../compiler/prevent-module-caching-suffix';
 import TEST_RUN_PHASE from '../../test-run/phase';
 import { TEST_RUN_ERRORS } from '../types';
 
-const SUBTITLES = {
+export const SUBTITLES = {
     [TEST_RUN_PHASE.initial]:                 '',
+    [TEST_RUN_PHASE.inTestRunBeforeHook]:     '<span class="subtitle">Error in testRun.before hook</span>\n',
     [TEST_RUN_PHASE.inFixtureBeforeHook]:     '<span class="subtitle">Error in fixture.before hook</span>\n',
     [TEST_RUN_PHASE.inFixtureBeforeEachHook]: '<span class="subtitle">Error in fixture.beforeEach hook</span>\n',
     [TEST_RUN_PHASE.inTestBeforeHook]:        '<span class="subtitle">Error in test.before hook</span>\n',
@@ -12,8 +14,10 @@ const SUBTITLES = {
     [TEST_RUN_PHASE.inTestAfterHook]:         '<span class="subtitle">Error in test.after hook</span>\n',
     [TEST_RUN_PHASE.inFixtureAfterEachHook]:  '<span class="subtitle">Error in fixture.afterEach hook</span>\n',
     [TEST_RUN_PHASE.inFixtureAfterHook]:      '<span class="subtitle">Error in fixture.after hook</span>\n',
+    [TEST_RUN_PHASE.inTestRunAfterHook]:      '<span class="subtitle">Error in testRun.after hook</span>\n',
     [TEST_RUN_PHASE.inRoleInitializer]:       '<span class="subtitle">Error in Role initializer</span>\n',
     [TEST_RUN_PHASE.inBookmarkRestore]:       '<span class="subtitle">Error while restoring configuration after Role switch</span>\n',
+    [TEST_RUN_PHASE.pendingFinalization]:     '',
 };
 
 export function renderForbiddenCharsList (forbiddenCharsList) {
@@ -68,6 +72,10 @@ export function shouldSkipCallsite (err) {
            err.code === TEST_RUN_ERRORS.uncaughtException;
 }
 
+export function removePreventModuleCachingSuffix (err) {
+    return err.replace(new RegExp(`\\?${PREVENT_MODULE_CACHING_SUFFIX}=\\d*`, 'g'), '');
+}
+
 export function markup (err, msgMarkup, errCallsite = '') {
     msgMarkup = dedent(`${SUBTITLES[err.testRunPhase]}<div class="message">${dedent(msgMarkup)}</div>`);
 
@@ -88,7 +96,7 @@ export function markup (err, msgMarkup, errCallsite = '') {
             msgMarkup += `\n\n${callsiteMarkup}`;
     }
 
-    return msgMarkup.replace('\t', '&nbsp;'.repeat(4));
+    return removePreventModuleCachingSuffix(msgMarkup.replace(/\t/g, '&nbsp;'.repeat(4)));
 }
 
 export function renderDiff (diff) {

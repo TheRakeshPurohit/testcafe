@@ -6,17 +6,20 @@ const browserProviderPool   = require('../../../../../lib/browser/provider/pool'
 const BrowserConnection     = require('../../../../../lib/browser/connection');
 const { noop }              = require('lodash');
 
+
+// TODO: Refactor tests to avoid shared browsers
 if (config.useLocalBrowsers) {
     describe('Browser Provider - Job Results Reporting', function () {
         const BROWSER_OPENING_DELAY = 4000;
 
         let mockProvider = null;
+        const needSkip   = config.hasBrowser('edge');
 
         const mockProviderPlugin = Object.assign({}, chromeBrowserProvider, {
             state:     {},
             idNameMap: {},
 
-            openBrowser (browserId, pageUrl, browserConfig) {
+            openBrowser (browserId, pageUrl, browserConfig, additionalOptions) {
                 const self       = this;
                 const providerId = typeof browserConfig ===
                                    'string' ? browserConfig : browserConfig.userArgs.replace(/\W*/, '');
@@ -34,7 +37,8 @@ if (config.useLocalBrowsers) {
                     ...browserConfig,
                     userArgs: `--no-sandbox ${browserConfig.userArgs}`,
                     headless: true,
-                });
+                },
+                { ...additionalOptions, disableMultipleWindows: false });
             },
 
             closeBrowser (browserId) {
@@ -75,7 +79,7 @@ if (config.useLocalBrowsers) {
                     end:   noop,
                 })
                 .browsers(browsers)
-                .run();
+                .run({ disableNativeAutomation: !config.nativeAutomation });
         }
 
         before(function () {
@@ -107,7 +111,7 @@ if (config.useLocalBrowsers) {
                 });
         });
 
-        it('Should report job error to the providers', () => {
+        (needSkip ? it.skip : it)('Should report job error to the providers', () => {
             return run(['chrome --failed-1', 'chrome --id-2'], './testcafe-fixtures/long-test.js')
                 .then(() => {
                     throw new Error('Promise rejection expected');

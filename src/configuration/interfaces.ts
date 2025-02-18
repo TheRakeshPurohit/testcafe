@@ -5,15 +5,28 @@ export interface FilterOption {
 
 export interface ReporterOption {
     name: string;
-    output? : string | Buffer;
+    output?: string | Buffer;
 }
 
 export interface Dictionary<T> {
     [key: string]: T;
 }
 
+export interface SkipJsErrorsOptionsObject {
+    stack?: string | RegExp;
+    message?: string | RegExp;
+    pageUrl?: string | RegExp;
+}
+
+export type SkipJsErrorsCallback = (opts?: { message?: string; stack: string; pageUrl: string }) => boolean;
+
+export interface SkipJsErrorsCallbackWithOptionsObject {
+    fn: SkipJsErrorsCallback;
+    dependencies?: Dictionary<any>;
+}
+
 export interface RunnerRunOptions {
-    skipJsErrors?: boolean;
+    skipJsErrors?: SkipJsErrorsOptionValue | SkipJsErrorsCallback | SkipJsErrorsCallbackWithOptionsObject;
     skipUncaughtErrors?: boolean;
     debugMode?: boolean;
     debugOnFail?: boolean;
@@ -21,6 +34,8 @@ export interface RunnerRunOptions {
     assertionTimeout?: number;
     pageLoadTimeout?: number;
     browserInitTimeout?: number;
+    testExecutionTimeout?: number;
+    runExecutionTimeout?: number;
     speed?: number;
     stopOnFirstFail?: boolean;
     disablePageCaching?: boolean;
@@ -30,6 +45,8 @@ export interface RunnerRunOptions {
     pageRequestTimeout?: number;
     ajaxRequestTimeout?: number;
     retryTestPages?: boolean;
+    hooks?: GlobalHooks;
+    baseUrl?: string;
 }
 
 export interface GetOptionConfiguration {

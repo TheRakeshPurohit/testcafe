@@ -1,21 +1,66 @@
 import { ClientFunction, Selector } from 'testcafe';
-import { expect } from 'chai';
 
 fixture `Native dialogs`
     .page `http://localhost:3000/fixtures/api/es-next/native-dialogs-handling/pages/index.html`;
-
 
 const getResult     = ClientFunction(() => document.getElementById('result').textContent);
 const pageUrl       = 'http://localhost:3000/fixtures/api/es-next/native-dialogs-handling/pages/index.html';
 const promptPageUrl = 'http://localhost:3000/fixtures/api/es-next/native-dialogs-handling/pages/prompt.html';
 
-
 test('Without handler', async t => {
     const info = await t.getNativeDialogHistory();
 
-    expect(info.length).equals(0);
+    await t.expect(info.length).eql(0);
 
     await t.click('#buttonConfirm');
+});
+
+test('Print without handler', async t => {
+    const info = await t.getNativeDialogHistory();
+
+    await t.expect(info.length).eql(0);
+
+    await t.click('#buttonPrint');
+});
+
+test('Expected print after an action', async t => {
+    await t
+        .setNativeDialogHandler(() => null)
+        .click('#buttonPrint');
+
+    const dialogs = await t.getNativeDialogHistory();
+
+    await t.expect(dialogs).eql([{ type: 'print', url: pageUrl }]);
+});
+
+
+test('Expected geolocation object and geolocation error returned after an action', async t => {
+    await t
+        .setNativeDialogHandler((type) => {
+            if (type === 'geolocation')
+                return { timestamp: 12356, coords: {} };
+
+            return null;
+        })
+        .click('#buttonGeo')
+        .expect(getResult()).eql('{"timestamp":12356,"coords":{}}')
+        .setNativeDialogHandler((type) => {
+            if (type !== 'geolocation')
+                return null;
+
+            const err = new Error('Some error');
+
+            err.code = 1;
+
+            return err;
+        })
+        .click('#buttonGeo')
+        .expect(getResult()).eql('{"message":"Some error","code":1}');
+
+    const history = await t.getNativeDialogHistory();
+
+    // NOTE: Only one record must be added to the history, since dialog appears only on the first geolocation request
+    await t.expect(history).eql([{ type: 'geolocation', url: pageUrl }]);
 });
 
 test('Expected confirm after an action', async t => {
@@ -28,7 +73,7 @@ test('Expected confirm after an action', async t => {
         })
         .click('#buttonConfirm');
 
-    expect(await getResult()).equals('true');
+    await t.expect(await getResult()).eql('true');
 });
 
 test('Expected confirm after an action (with dependencies)', async t => {
@@ -43,7 +88,7 @@ test('Expected confirm after an action (with dependencies)', async t => {
         .setNativeDialogHandler((type, text) => dialogHandler(type, text), { dependencies: { dialogHandler } })
         .click('#buttonConfirm');
 
-    expect(await getResult()).equals('true');
+    await t.expect(await getResult()).eql('true');
 });
 
 test('Expected confirm after an action (client function)', async t => {
@@ -58,21 +103,26 @@ test('Expected confirm after an action (client function)', async t => {
         .setNativeDialogHandler(dialogHandler)
         .click('#buttonConfirm');
 
-    expect(await getResult()).equals('true');
+    await t.expect(await getResult()).eql('true');
 });
 
 test('Different dialogs after actions', async t => {
     await t
         .setNativeDialogHandler(type => {
-            if (type === 'confirm')
+            if (type !== 'alert')
                 throw new Error('Wrong dialog type');
         })
         .click('#buttonAlert')
         .setNativeDialogHandler(type => {
-            if (type === 'alert')
+            if (type !== 'confirm')
                 throw new Error('Wrong dialog type');
         })
-        .click('#buttonConfirm');
+        .click('#buttonConfirm')
+        .setNativeDialogHandler(type => {
+            if (type !== 'print')
+                throw new Error('Wrong dialog type');
+        })
+        .click('#buttonPrint');
 });
 
 test('Confirm dialog with wrong text', async t => {
@@ -82,7 +132,7 @@ test('Confirm dialog with wrong text', async t => {
         })
         .click('#buttonConfirm');
 
-    expect(await getResult()).equals('true');
+    await t.expect(await getResult()).eql('true');
 });
 
 test('No expected confirm after an action', async t => {
@@ -92,7 +142,7 @@ test('No expected confirm after an action', async t => {
 
     const info = await t.getNativeDialogHistory();
 
-    expect(info.length).equals(1);
+    await t.expect(info.length).eql(1);
 });
 
 test('Expected beforeUnload after an action', async t => {
@@ -104,7 +154,7 @@ test('Expected beforeUnload after an action', async t => {
 
     const info = await t.getNativeDialogHistory();
 
-    expect(info).to.deep.equal([{ type: 'beforeunload', text: 'Before unload', url: pageUrl }]);
+    await t.expect(info).eql([{ type: 'beforeunload', text: 'Before unload', url: pageUrl }]);
 });
 
 test('Expected alert and prompt after redirect', async t => {
@@ -118,11 +168,11 @@ test('Expected alert and prompt after redirect', async t => {
         })
         .click('#buttonRedirectPrompt');
 
-    expect(await getResult()).equals('prompt result');
+    await t.expect(await getResult()).eql('prompt result');
 
     const info = await t.getNativeDialogHistory();
 
-    expect(info).to.deep.equal([
+    await t.expect(info).eql([
         {
             type: 'prompt',
             text: 'Prompt:',
@@ -149,7 +199,7 @@ test('Expected alert during a wait action', async t => {
 
     const info = await t.getNativeDialogHistory();
 
-    expect(info).to.deep.equal([{ type: 'alert', text: 'Alert!', url: pageUrl }]);
+    await t.expect(info).eql([{ type: 'alert', text: 'Alert!', url: pageUrl }]);
 });
 
 test('No expected alert during a wait action', async t => {
@@ -160,7 +210,7 @@ test('No expected alert during a wait action', async t => {
 
     const info = await t.getNativeDialogHistory();
 
-    expect(info.length).equals(1);
+    await t.expect(info.length).eql(1);
 });
 
 test('Unexpected alert during a wait action', async t => {
@@ -192,3 +242,45 @@ test('Null handler', async t => {
         .setNativeDialogHandler(null)
         .click('#buttonAlert');
 });
+
+const getGeolocation = ClientFunction(() => new Promise((resolve, reject) =>
+    navigator.geolocation.getCurrentPosition(resolve, reject),
+));
+
+test('Should not override getCurrentPosition method if it is overrided via client function', async t => {
+    const overrideMethod = ClientFunction(() => {
+        window.navigator.geolocation.getCurrentPosition = success => success('client-function');
+    });
+
+    await overrideMethod();
+
+    await t.setNativeDialogHandler(() => 'handler value')
+        .expect(getGeolocation()).eql('client-function');
+});
+
+test
+    .clientScripts({
+        content: 'window.navigator.geolocation.getCurrentPosition = success => success("client-scripts");',
+    })
+    ('Should not override getCurrentPosition method if it is overrided via client scripts', async t => {
+
+        await t.setNativeDialogHandler(() => 'handler value')
+            .expect(getGeolocation()).eql('client-scripts');
+    });
+
+test
+    .clientScripts({
+        content: 'Geolocation.prototype.getCurrentPosition = success => success("client-scripts");',
+    })
+    ('Should not override getCurrentPosition method if prototype is overrided via client scripts', async t => {
+
+        await t.setNativeDialogHandler(() => 'handler value')
+            .expect(getGeolocation()).eql('client-scripts');
+    });
+
+test
+    .page('http://localhost:3000/fixtures/api/es-next/native-dialogs-handling/pages/geolocation-overrided.html')
+    ('Should not override getCurrentPosition method if it is overrided on a page', async t => {
+        await t.setNativeDialogHandler(() => 'handler value')
+            .expect(getGeolocation()).eql('on-page');
+    });

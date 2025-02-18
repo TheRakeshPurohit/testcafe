@@ -35,6 +35,7 @@ const {
     UncaughtExceptionError,
     ActionElementNotFoundError,
     ActionElementIsInvisibleError,
+    ActionElementIsNotTargetError,
     ActionSelectorMatchesWrongNodeTypeError,
     ActionAdditionalElementNotFoundError,
     ActionAdditionalElementIsInvisibleError,
@@ -87,8 +88,28 @@ const {
     MultipleWindowsModeIsDisabledError,
     CannotCloseWindowWithoutParentError,
     MultipleWindowsModeIsNotAvailableInRemoteBrowserError,
+    MultipleWindowsModeIsNotSupportedInNativeAutomationModeError,
     CannotRestoreChildWindowError,
-} = require('../../lib/errors/test-run');
+    TimeoutError,
+    ActionCookieArgumentError,
+    ActionCookieArgumentsError,
+    ActionUrlCookieArgumentError,
+    ActionUrlsCookieArgumentError,
+    ActionRequiredCookieArguments,
+    ActionStringOptionError,
+    ActionDateOptionError,
+    ActionNumberOptionError,
+    ActionUrlOptionError,
+    ActionUrlSearchParamsOptionError,
+    ActionObjectOptionError,
+    ActionUrlArgumentError,
+    ActionSkipJsErrorsArgumentTypeError,
+}                                                                   = require('../../lib/errors/test-run');
+const {
+    ActionStringOrRegexOptionError,
+    ActionFunctionOptionError,
+    ActionInvalidObjectPropertyError,
+} = require('../../lib/shared/errors');
 
 const untestedErrorTypes = Object.keys(TEST_RUN_ERRORS).map(key => TEST_RUN_ERRORS[key]);
 
@@ -290,6 +311,10 @@ describe('Error formatting', () => {
         it('Base error formattable adapter properties', () => {
             const testRunMock = TestRun.prototype;
 
+            testRunMock._ensureErrorId = err => {
+                err.id = 'error-id';
+            };
+
             Object.assign(testRunMock, {
                 session:           { id: 'test-run-id' },
                 browserConnection: { userAgent: 'chrome' },
@@ -311,6 +336,7 @@ describe('Error formatting', () => {
                 testRunId:      'test-run-id',
                 testRunPhase:   'test-run-phase',
                 callsite:       'callsite',
+                id:             'error-id',
             });
         });
 
@@ -396,6 +422,10 @@ describe('Error formatting', () => {
 
         it('Should format "actionElementIsInvisibleError" message', () => {
             assertErrorMessage('action-element-is-invisible-error', new ActionElementIsInvisibleError());
+        });
+
+        it('Should format "actionElementIsNotTargetError" message', () => {
+            assertErrorMessage('action-element-is-not-target-error', new ActionElementIsNotTargetError());
         });
 
         it('Should format "actionSelectorMatchesWrongNodeTypeError" message', () => {
@@ -741,8 +771,80 @@ describe('Error formatting', () => {
             assertErrorMessage('multiple-windows-mode-is-not-available-in-remote-browser-error', new MultipleWindowsModeIsNotAvailableInRemoteBrowserError('openWindow'));
         });
 
+        it('Should format "multipleWindowsModeIsNotSupportedInNativeAutomationError"', () => {
+            assertErrorMessage('multiple-windows-mode-is-not-supported-in-native-automation-error', new MultipleWindowsModeIsNotSupportedInNativeAutomationModeError('openWindow'));
+        });
+
         it('Should format "cannotRestoreChildWindowError"', () => {
             assertErrorMessage('cannot-restore-child-window-error', new CannotRestoreChildWindowError());
+        });
+
+        it('Should format "executionTimeoutExceeded"', () => {
+            assertErrorMessage('execution-timeout-exceeded', new TimeoutError(500, 'Scope'));
+        });
+
+        it('Should format "actionCookieArgumentError"', () => {
+            assertErrorMessage('action-cookie-argument-error', new ActionCookieArgumentError());
+        });
+
+        it('Should format "actionCookieArgumentsError"', () => {
+            assertErrorMessage('action-cookie-arguments-error', new ActionCookieArgumentsError(0, false));
+        });
+
+        it('Should format "actionUrlCookieArgumentError"', () => {
+            assertErrorMessage('action-url-cookie-argument-error', new ActionUrlCookieArgumentError());
+        });
+
+        it('Should format "ActionUrlsCookieArgumentError"', () => {
+            assertErrorMessage('action-urls-cookie-argument-error', new ActionUrlsCookieArgumentError(0, 'crash'));
+        });
+
+        it('Should format "actionRequiredSetCookieArgumentsAreMissedError"', () => {
+            assertErrorMessage('action-required-cookie-arguments', new ActionRequiredCookieArguments());
+        });
+
+        it('Should format "actionStringOptionError"', () => {
+            assertErrorMessage('action-string-option-error', new ActionStringOptionError('name', 'object'));
+        });
+
+        it('Should format "actionExpiresOptionError"', () => {
+            assertErrorMessage('action-date-option-error', new ActionDateOptionError('expires', 'string'));
+        });
+
+        it('Should format "actionNumberOptionError"', () => {
+            assertErrorMessage('action-number-option-error', new ActionNumberOptionError('maxAge', 'object'));
+        });
+
+        it('Should format "actionUrlOptionError"', () => {
+            assertErrorMessage('action-url-option-error', new ActionUrlOptionError('url', 'object'));
+        });
+
+        it('Should format "actionUrlSearchParamsOptionError"', () => {
+            assertErrorMessage('action-url-search-params-option-error', new ActionUrlSearchParamsOptionError('params', 'number'));
+        });
+
+        it('Should format "actionObjectOptionError"', () => {
+            assertErrorMessage('action-object-option-error', new ActionObjectOptionError('headers', 'number'));
+        });
+
+        it('Should format "actionUrlArgumentError"', () => {
+            assertErrorMessage('action-url-argument-error', new ActionUrlArgumentError('url', 'object'));
+        });
+
+        it('Should format "actionStringOrRegexOptionError"', () => {
+            assertErrorMessage('action-string-or-regex-argument-error', new ActionStringOrRegexOptionError('SkipJsErrorsOptions.message', 'object'));
+        });
+
+        it('Should format "actionSkipJsErrorsArgumentTypeError"', () => {
+            assertErrorMessage('action-skip-js-errors-argument-error', new ActionSkipJsErrorsArgumentTypeError('options', 'string'));
+        });
+
+        it('Should format "actionFunctionOptionError"', () => {
+            assertErrorMessage('action-function-option-error', new ActionFunctionOptionError('fn', 'string'));
+        });
+
+        it('Should format "actionInvalidObjectPropertyError"', () => {
+            assertErrorMessage('action-invalid-object-property-error', new ActionInvalidObjectPropertyError('ClickOptions', 'invalidProp', ['alt', 'ctrl']));
         });
     });
 

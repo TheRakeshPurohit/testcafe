@@ -16,33 +16,43 @@ import { SPECIAL_BLANK_PAGE } from 'testcafe-hammerhead';
 import { TestTimeouts } from './interfaces';
 import TestTimeout from './test-timeout';
 
+interface TestInitOptions {
+    testFile: TestFile;
+    baseUrl?: string;
+}
 
 export default class Test extends TestingUnit {
     public fixture: Fixture | null;
     public fn: Function | null;
     public beforeFn: Function | null;
     public afterFn: Function | null;
+    public globalBeforeFn: Function | null;
+    public globalAfterFn: Function | null;
     public timeouts: TestTimeouts | null;
-    private readonly _isCompilerService: boolean;
 
-    public constructor (testFile: TestFile, isCompilerServiceMode = false) {
+    public constructor (testFile: TestFile, baseUrl?: string, returnApiOrigin = true) {
         // NOTE: 'fixture' directive can be missing
         const fixture = testFile.currentFixture as Fixture;
         const pageUrl = fixture?.pageUrl || SPECIAL_BLANK_PAGE;
 
-        super(testFile, UnitType.test, pageUrl);
+        super(testFile, UnitType.test, pageUrl, baseUrl);
 
-        this.fixture  = null;
-        this.fn       = null;
-        this.beforeFn = null;
-        this.afterFn  = null;
-        this.timeouts = null;
-
-        this._isCompilerService = isCompilerServiceMode;
+        this.fixture        = null;
+        this.fn             = null;
+        this.beforeFn       = null;
+        this.afterFn        = null;
+        this.globalBeforeFn = null;
+        this.globalAfterFn  = null;
+        this.timeouts       = null;
 
         this._initFixture(testFile);
 
-        return this.apiOrigin as unknown as Test;
+        if (returnApiOrigin)
+            return this.apiOrigin as unknown as Test;
+    }
+
+    public static init ({ testFile, baseUrl }: TestInitOptions): Test {
+        return TestingUnit.init(Test, testFile, baseUrl) as unknown as Test;
     }
 
     private _initFixture (testFile: TestFile): void {
@@ -51,20 +61,19 @@ export default class Test extends TestingUnit {
         if (!this.fixture)
             return;
 
-        this.requestHooks  = this.fixture.requestHooks.slice();
-        this.clientScripts = this.fixture.clientScripts.slice();
+        this.pageUrl             = this.fixture.pageUrl || SPECIAL_BLANK_PAGE;
+        this.requestHooks        = this.fixture.requestHooks.slice();
+        this.clientScripts       = this.fixture.clientScripts.slice();
+        this.skipJsErrorsOptions = this.fixture.skipJsErrorsOptions;
     }
 
     protected _add (name: string, fn: Function): Function {
-        if (this._isCompilerService && !this.fixture)
-            this._initFixture(this.testFile);
-
         assertType(is.string, 'apiOrigin', 'The test name', name);
         assertType(is.function, 'apiOrigin', 'The test body', fn);
         assertType(is.nonNullObject, 'apiOrigin', `The fixture of '${name}' test`, this.fixture);
 
-        this.name          = name;
-        this.fn            = wrapTestFunction(fn);
+        this.name = name;
+        this.fn   = wrapTestFunction(fn);
 
         if (!this.testFile.collectedTests.includes(this))
             this.testFile.collectedTests.push(this);

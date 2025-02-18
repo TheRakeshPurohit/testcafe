@@ -1,7 +1,6 @@
 const { expect }                                = require('chai');
 const ClientScript                              = require('../../lib/custom-client-scripts/client-script');
 const loadClientScripts                         = require('../../lib/custom-client-scripts/load');
-const getCustomClientScriptURL                  = require('../../lib/custom-client-scripts/get-url');
 const { RequestFilterRule }                     = require('testcafe-hammerhead');
 const tmp                                       = require('tmp');
 const fs                                        = require('fs');
@@ -187,7 +186,9 @@ describe('Client scripts', () => {
                 expect.fail('Should throw the error');
             })
             .catch(e => {
-                expect(e.message).eql('Cannot load a client script from /non-existing-file.');
+                expect(e.message).contains(
+                    'Cannot load a client script from /non-existing-file.\n' +
+                    'ENOENT: no such file or directory, open');
             });
     });
 
@@ -290,13 +291,11 @@ describe('Client scripts', () => {
         expect(is.clientScriptInitializer.predicate({ module: 'module-name' })).to.be.true;
     });
 
-    it('Get URL', () => {
+    it('Get URL', async () => {
         const script = new ClientScript({ content: testScriptContent });
 
-        return script
-            .load()
-            .then(() => {
-                expect(getCustomClientScriptURL(script)).eql('/custom-client-scripts/' + script.url);
-            });
+        await script.load();
+
+        expect(script.getResultUrl('123')).eql('/custom-client-scripts/123/' + script.url);
     });
 });

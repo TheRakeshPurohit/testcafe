@@ -1,6 +1,6 @@
-const expect     = require('chai').expect;
-const isFreePort = require('endpoint-utils').isFreePort;
-const delay      = require('../../../../lib/utils/delay');
+const { expect }     = require('chai');
+const { isFreePort } = require('../../../../lib/utils/endpoint-utils');
+const delay          = require('../../../../lib/utils/delay');
 
 describe('App command', function () {
     it('Should fail task if app fails', function () {

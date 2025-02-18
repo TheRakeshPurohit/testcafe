@@ -1,5 +1,4 @@
 const path                       = require('path');
-const SlConnector                = require('saucelabs-connector');
 const BsConnector                = require('browserstack-connector');
 const caller                     = require('caller');
 const promisifyEvent             = require('promisify-event');
@@ -12,6 +11,12 @@ const RemoteConnector            = require('./remote-connector');
 const getTestError               = require('./get-test-error.js');
 const { createSimpleTestStream } = require('./utils/stream');
 const BrowserConnectionStatus    = require('../../lib/browser/connection/status');
+const osFamily                   = require('os-family');
+const { findWindow, errors }     = require('testcafe-browser-tools');
+const authenticationHelper       = require('../../lib/cli/authentication-helper');
+const isCI                       = require('is-ci');
+
+const setNativeAutomationForRemoteConnection = require('./utils/set-native-automation-for-remote-connection');
 
 let testCafe     = null;
 let browsersInfo = null;
@@ -38,22 +43,68 @@ const REQUESTED_MACHINES_COUNT = environment.browsers.length;
 
 const REMOTE_CONNECTORS_MAP = {
     [config.browserProviderNames.browserstack]: BsConnector,
-    [config.browserProviderNames.sauceLabs]:    SlConnector,
     [config.browserProviderNames.remote]:       RemoteConnector,
 };
 
 const USE_PROVIDER_POOL = config.useLocalBrowsers || isBrowserStack;
 
+async function hasLocalBrowsers (browserInfo) {
+    for (const browser of browserInfo) {
+        if (browser instanceof BrowserConnection)
+            continue;
+
+        if (await browser.provider.isLocalBrowser(void 0, browser.browserName))
+            return true;
+    }
+
+    return false;
+}
+
+async function createTestcafeBrowserTools (browserInfo) {
+    const hasLocal = await hasLocalBrowsers([browserInfo]);
+
+    const { error } = await authenticationHelper(
+        () => findWindow(''),
+        errors.UnableToAccessScreenRecordingAPIError,
+        {
+            interactive: hasLocal && !isCI,
+        },
+    );
+
+    if (!error)
+        return;
+
+    if (hasLocal)
+        throw error;
+}
+
 function getBrowserInfo (settings) {
     return Promise
         .resolve()
+        .then(() => {
+            if (osFamily.mac) {
+                return browserProviderPool
+                    .getBrowserInfo(settings.browserName)
+                    .then((browserInfo) => createTestcafeBrowserTools(browserInfo));
+            }
+
+            return Promise.resolve();
+        })
         .then(() => {
             if (!USE_PROVIDER_POOL)
                 return testCafe.createBrowserConnection();
 
             return browserProviderPool
                 .getBrowserInfo(settings.browserName)
-                .then(browserInfo => new BrowserConnection(testCafe.browserConnectionGateway, browserInfo, true, false, config.proxyless));
+                .then(browserInfo => {
+                    const options = {
+                        disableMultipleWindows: false,
+                        nativeAutomation:       config.nativeAutomation,
+                        developmentMode:        config.devMode,
+                    };
+
+                    return new BrowserConnection(testCafe.browserConnectionGateway, browserInfo, true, options);
+                });
         })
         .then(connection => {
             return {
@@ -103,6 +154,9 @@ function openRemoteBrowsers () {
 }
 
 function waitUtilBrowserConnectionOpened (connection) {
+    if (connection.status === BrowserConnectionStatus.uninitialized)
+        connection.initialize();
+
     const connectedPromise = connection.status === BrowserConnectionStatus.opened
         ? Promise.resolve()
         : promisifyEvent(connection, 'opened');
@@ -118,13 +172,12 @@ function waitUntilBrowsersConnected () {
     return Promise.all(browsersInfo.map(browserInfo => waitUtilBrowserConnectionOpened(browserInfo.connection)));
 }
 
-function closeRemoteBrowsers () {
+async function closeRemoteBrowsers () {
     const closeBrowserPromises = browserInstances.map(browser => connector.stopBrowser(isBrowserStack ? browser.id : browser));
 
-    return Promise.all(closeBrowserPromises)
-        .then(() => {
-            return connector.disconnect();
-        });
+    await Promise.all(closeBrowserPromises);
+
+    await connector.disconnect();
 }
 
 function closeLocalBrowsers () {
@@ -152,14 +205,12 @@ before(function () {
         developmentMode: devMode,
 
         retryTestPages,
-
-        experimentalDebug: !!process.env.EXPERIMENTAL_DEBUG,
-        proxyless:         config.proxyless,
-        userVariables:     {
+        userVariables: {
             url:             'localhost',
             port:            1337,
             isUserVariables: true,
         },
+        esm: config.esm,
     };
 
     return createTestCafe(testCafeOptions)
@@ -181,8 +232,13 @@ before(function () {
             if (isBrowserStack || !USE_PROVIDER_POOL)
                 mocha.timeout(0);
 
-            if (USE_PROVIDER_POOL)
-                return Promise.resolve();
+            if (USE_PROVIDER_POOL) {
+                testCafe.configuration.mergeOptions({
+                    disableNativeAutomation: !config.nativeAutomation,
+                });
+
+                return testCafe.initializeBrowserConnectionGateway();
+            }
 
             return openRemoteBrowsers();
         })
@@ -212,6 +268,7 @@ before(function () {
                     skipJsErrors,
                     quarantineMode,
                     screenshotPathPattern,
+                    screenshotPathPatternOnFails,
                     screenshotsOnFails,
                     screenshotsFullPage,
                     videoOptions,
@@ -230,10 +287,16 @@ before(function () {
                     disablePageReloads,
                     disableScreenshots,
                     disableMultipleWindows,
+                    experimentalMultipleWindows,
                     pageRequestTimeout,
                     ajaxRequestTimeout,
                     userVariables,
                     tsConfigPath,
+                    hooks,
+                    testExecutionTimeout,
+                    runExecutionTimeout,
+                    baseUrl,
+                    customActions,
                 } = opts;
 
                 const actualBrowsers = browsersInfo.filter(browserInfo => {
@@ -270,6 +333,9 @@ before(function () {
                 else
                     runner.reporter('json', stream);
 
+                if (config.nativeAutomation)
+                    setNativeAutomationForRemoteConnection(runner);
+
                 return runner
                     .useProxy(proxy, proxyBypass)
                     .browsers(connections)
@@ -278,7 +344,13 @@ before(function () {
                         return testName ? test === testName : true;
                     })
                     .src(fixturePath)
-                    .screenshots(screenshotPath, screenshotsOnFails, screenshotPathPattern, screenshotsFullPage)
+                    .screenshots({
+                        path:               screenshotPath,
+                        takeOnFails:        screenshotsOnFails,
+                        pathPattern:        screenshotPathPattern,
+                        pathPatternOnFails: screenshotPathPatternOnFails,
+                        fullPage:           screenshotsFullPage,
+                    })
                     .video(videoPath, videoOptions, videoEncodingOptions)
                     .startApp(appCommand, appInitDelay)
                     .clientScripts(clientScripts)
@@ -296,10 +368,17 @@ before(function () {
                         disablePageReloads,
                         disableScreenshots,
                         disableMultipleWindows,
+                        experimentalMultipleWindows,
                         pageRequestTimeout,
                         ajaxRequestTimeout,
                         userVariables,
                         tsConfigPath,
+                        hooks,
+                        testExecutionTimeout,
+                        runExecutionTimeout,
+                        baseUrl,
+                        customActions,
+                        nativeAutomation: config.nativeAutomation,
                     })
                     .then(failedCount => {
                         if (customReporters)
@@ -327,7 +406,7 @@ beforeEach(function () {
     global.currentTest = this.currentTest;
 });
 
-after(function () {
+after(async function () {
     this.timeout(60000);
 
     testCafe.close();
@@ -337,9 +416,15 @@ after(function () {
     delete global.runTests;
     delete global.testReport;
 
-    if (!USE_PROVIDER_POOL)
-        return closeRemoteBrowsers();
-
-    return closeLocalBrowsers();
+    if (!USE_PROVIDER_POOL) {
+        // TODO: we should determine the reason why Browserstack browser hangs at the end
+        // HACK: the timeout prevents tests from failing when we can't close Browserstack browsers
+        await Promise.race([
+            closeRemoteBrowsers(),
+            new Promise(resolve => setTimeout(resolve, 57000)),
+        ]);
+    }
+    else
+        await closeLocalBrowsers();
 });
 

@@ -1,5 +1,4 @@
 const hammerhead       = window.getTestCafeModule('hammerhead');
-const browserUtils     = hammerhead.utils.browser;
 const featureDetection = hammerhead.utils.featureDetection;
 
 const testCafeCore  = window.getTestCafeModule('testCafeCore');
@@ -17,6 +16,7 @@ const RClickAutomation       = testCafeAutomation.RClick;
 const DblClickAutomation     = testCafeAutomation.DblClick;
 const DragToOffsetAutomation = testCafeAutomation.DragToOffset;
 const TypeAutomation         = testCafeAutomation.Type;
+const cursor                 = testCafeAutomation.cursor;
 
 
 $(document).ready(function () {
@@ -164,12 +164,7 @@ $(document).ready(function () {
     };
 
     const startNext = function () {
-        if (browserUtils.isIE) {
-            removeTestElements();
-            window.setTimeout(start, 30);
-        }
-        else
-            start();
+        start();
     };
 
     const removeTestElements = function () {
@@ -186,8 +181,7 @@ $(document).ready(function () {
     };
 
     QUnit.testDone(function () {
-        if (!browserUtils.isIE)
-            removeTestElements();
+        removeTestElements();
     });
 
     //tests
@@ -229,7 +223,7 @@ $(document).ready(function () {
             offsetY: offsetY,
         });
 
-        const clickAutomation = new ClickAutomation($smallDiv[0], clickOptions);
+        const clickAutomation = new ClickAutomation($smallDiv[0], clickOptions, window, cursor);
 
         clickAutomation
             .run()

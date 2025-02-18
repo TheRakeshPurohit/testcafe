@@ -5,7 +5,11 @@ import {
 } from 'path';
 
 import { generateThumbnail } from 'testcafe-browser-tools';
-import { cropScreenshot } from './crop';
+import {
+    cropScreenshot,
+    calculateMarkPosition,
+    markSeedToId,
+} from './crop';
 import { isInQueue, addToQueue } from '../utils/async-queue';
 import WARNING_MESSAGE from '../notifications/warning-message';
 import escapeUserAgent from '../utils/escape-user-agent';
@@ -99,8 +103,8 @@ export default class Capturer {
         return this._joinWithBaseScreenshotPath(correctedCustomPath);
     }
 
-    _getScreenshotPath (forError) {
-        const path = this.pathPattern.getPath(forError);
+    _getScreenshotPath (forError, customPathPattern) {
+        const path = this.pathPattern.getPath(forError, customPathPattern);
 
         this._incrementFileIndexes(forError);
 
@@ -118,14 +122,18 @@ export default class Capturer {
         await this.provider.takeScreenshot(this.browserId, filePath, pageWidth, pageHeight, fullPage);
     }
 
-    async _capture (forError, { pageDimensions, cropDimensions, markSeed, customPath, fullPage, thumbnails } = {}) {
+    async _capture (forError, { actionId, failedActionId, pageDimensions, cropDimensions, markSeed, customPath, customPathPattern, fullPage, thumbnails } = {}) {
         if (!this.enabled)
             return null;
 
         thumbnails = thumbnails === void 0 ? this.thumbnails : thumbnails;
 
-        const screenshotPath = customPath ? this._getCustomScreenshotPath(customPath) : this._getScreenshotPath(forError);
+        const screenshotPath = customPath ? this._getCustomScreenshotPath(customPath) : this._getScreenshotPath(forError, customPathPattern);
+
         const thumbnailPath  = this._getThumbnailPath(screenshotPath);
+
+        if (customPath && customPathPattern)
+            this.warningLog.addWarning(WARNING_MESSAGE.screenshotPathOverridesPathPattern, customPath, customPathPattern);
 
         if (isInQueue(screenshotPath))
             this.warningLog.addWarning(WARNING_MESSAGE.screenshotRewritingError, screenshotPath);
@@ -149,8 +157,13 @@ export default class Capturer {
 
             const image = await readPngFile(screenshotPath);
 
+            const markSeedPosition = markSeed ? calculateMarkPosition(image, markSeed) : null;
+
+            if (markSeed && !markSeedPosition)
+                this.warningLog.addWarning(WARNING_MESSAGE.screenshotMarkNotFound, screenshotPath, markSeedToId(markSeed));
+
             const croppedImage = await cropScreenshot(image, {
-                markSeed,
+                markSeedPosition,
                 clientAreaDimensions,
                 path:           screenshotPath,
                 cropDimensions: Capturer._getCropDimensions(cropDimensions, pageDimensions),
@@ -175,6 +188,7 @@ export default class Capturer {
             userAgent,
             quarantineAttempt,
             takenOnFail,
+            actionId: failedActionId || actionId,
         };
 
         this.testEntry.screenshots.push(screenshot);

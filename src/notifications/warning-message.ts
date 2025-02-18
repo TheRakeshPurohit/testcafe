@@ -4,6 +4,7 @@ export default {
     screenshotMarkNotFound:                  'Unable to locate the page area in the browser window screenshot at {screenshotPath}, because the page area mark with ID {markId} is not found in the screenshot.',
     screenshotsFullPageNotSupported:         'TestCafe does not support full-page screenshots in {browserAlias}.',
     screenshotRewritingError:                'The file at "{screenshotPath}" already exists. It has just been rewritten with a recent screenshot. This situation can possibly cause issues. To avoid them, make sure that each screenshot has a unique path. If a test runs in multiple browsers, consider including the user agent in the screenshot path or generate a unique identifier in another way.',
+    screenshotPathOverridesPathPattern:      'The t.takeScreenshot method includes two conflicting parameters: "path" ({customPath})  and "pathPattern" ({customPathPattern}). TestCafe applied the "path" parameter, and ignored the "pathPattern" parameter. Remove one of the parameters to dismiss this warning.',
     browserManipulationsOnRemoteBrowser:     'The screenshot and window resize functionalities are not supported in a remote browser. They can function only if the browser is running on the same machine and in the same environment as the TestCafe server.',
     screenshotNotSupportedByBrowserProvider: 'The screenshot functionality is not supported by the "{providerName}" browser provider.',
     videoNotSupportedByBrowser:              'Video recording is not supported by the "{browserAlias}" browser.',
@@ -14,8 +15,6 @@ export default {
     maximizeError:                           'Was unable to maximize the window due to an error.\n\n{errMessage}',
     requestMockCORSValidationFailed:         '{RequestHook}: CORS validation failed for a request specified as {requestFilterRule}',
     debugInHeadlessError:                    'You cannot debug in headless mode.',
-    cannotReadConfigFile:                    'An error has occurred while reading the "{path}" configuration file.',
-    cannotParseConfigFile:                   "Failed to parse the '{path}' file.\n\nThis file is not a well-formed JSON file.",
     configOptionsWereOverridden:             'The {optionsString} option{suffix} from the configuration file will be ignored.',
     cannotOverrideTypeScriptConfigOptions:   'You cannot override the "{optionName}" compiler option in the TypeScript configuration file.\n',
 
@@ -32,7 +31,8 @@ export default {
                                  '\n' +
                                  '{err}',
 
-    problematicPathPatternPlaceholderForVideoRecording: 'The {placeholderList} path pattern placeholder{suffix} cannot be applied to the recorded video.\n' +
+    problematicPathPatternPlaceholderForVideoRecording: 'TestCafe could not apply the following video recording save path pattern{suffix}: {placeHolderPattern}.\n' +
+                                                        'You may encounter this behavior when you enable the "singleFile" video recording option and use test-specific path patterns.\n' +
                                                         '\n' +
                                                         'The placeholder{suffix} {verb} replaced with an empty string.',
 
@@ -48,6 +48,7 @@ export default {
     testsCompilationTakesTooLong:       'Tests took too long to compile ({compileTime}). Ensure the test code has no excessive imports.',
     deprecatedAPI:                      '{API} is deprecated and will be removed in the next major release. Use {replacement} instead.',
     unawaitedMethodWithAssertion:       "An asynchronous method that you do not await includes an assertion. Inspect that method's execution chain and add the 'await' keyword where necessary.",
-    multipleConfigurationFilesFound:    'There are multiple configuration files found, TestCafe will only use one. The file "{path}" will be used.\nThe priority order is as follows:\n{priorityList}',
+    multipleConfigurationFilesFound:    'TestCafe detected more than one configuration file.\nTo prevent configuration conflicts, TestCafe will use the configuration file with the highest priority: {path}.\nRefer to the following article for more information: https://testcafe.io/documentation/402638/reference/configuration-file?search#configuration-file-priority',
+    elementOverlapped:                  'TestCafe cannot interact with the {expected} element because another element obstructs it.\nWhen something overlaps the action target, TestCafe performs the action with the topmost element at the original target\'s location.\nThe following element with a greater z-order replaced the original action target: {actual}.\nReview your code to prevent this behavior.',
 };
 

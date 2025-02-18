@@ -3,12 +3,14 @@ const { expect }           = require('chai');
 const config               = require('../../../config');
 const { createNullStream } = require('../../../utils/stream');
 const { createReporter }   = require('../../../utils/reporter');
-const os                   = require('os-family');
+const osFamily             = require('os-family');
 const detectDisplay        = require('../../../../../lib/utils/detect-display');
 
-const isLinuxWithoutGUI = os.linux && !detectDisplay();
+const isLinuxWithoutGUI = osFamily.linux && !detectDisplay();
 
-if (config.useLocalBrowsers) {
+
+// TODO: separate tests to avoid shared browsers that consume additional resources
+if (config.useLocalBrowsers && config.hasBrowser('chrome')) {
     describe('Browser Provider - Chrome Emulation Mode', () => {
         describe('Should emulate touch event handlers', () => {
             async function checkTouchEmulation (browserAlias) {
@@ -18,16 +20,14 @@ if (config.useLocalBrowsers) {
                     .filter(fixtureName => fixtureName === 'Check presence of touch event handlers')
                     .reporter('minimal', createNullStream())
                     .browsers(browserAlias)
-                    .run();
+                    .run({ disableNativeAutomation: !config.nativeAutomation });
 
                 expect(failedCount).eql(0);
             }
 
-            if (!config.proxyless) {
-                it('headless', () => {
-                    return checkTouchEmulation('chrome:headless:emulation:device=iphone 6 --no-sandbox');
-                });
-            }
+            it('headless', () => {
+                return checkTouchEmulation('chrome:headless:emulation:device=iphone 6 --no-sandbox');
+            });
 
             if (!isLinuxWithoutGUI) {
                 it('non-headless', () => {
@@ -50,7 +50,7 @@ if (config.useLocalBrowsers) {
                 .src(path.join(__dirname, './testcafe-fixtures/index-test.js'))
                 .reporter(reporter)
                 .browsers('chrome:headless:emulation:device=iphone X --no-sandbox')
-                .run();
+                .run({ disableNativeAutomation: !config.nativeAutomation });
 
             expect(prettyUserAgents.length).eql(1);
             expect(prettyUserAgents[0]).endsWith('(Emulating iPhone X)');

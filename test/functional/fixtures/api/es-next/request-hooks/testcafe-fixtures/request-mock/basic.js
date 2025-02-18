@@ -1,20 +1,21 @@
 import { Selector, RequestMock } from 'testcafe';
+import DUMMY_URLS from '../../common/mock-routes.js';
 
 const testPageMarkup = `
     <html>
         <body>
             <h1>Mocked page</h1>
             <h2></h2>
-            <button onclick="sendRequest()"></button>
+            <button onclick="sendRequest()">Send request</button>
             <script>
                 function sendRequest() {
-                    fetch('http://dummy-url.com/get')
+                    fetch('${DUMMY_URLS.secureGet}')
                         .then(res => {
                             return res.text();
                         })
                         .then(text => {
-                            document.querySelector('h2').textContent = text;                            
-                        });                    
+                            document.querySelector('h2').textContent = text;
+                        });
                 }
             </script>
         </body>
@@ -22,11 +23,11 @@ const testPageMarkup = `
 `;
 
 const requestMock = RequestMock()
-    .onRequestTo('http://dummy-url.com')
+    .onRequestTo(DUMMY_URLS.secureMain)
     .respond(testPageMarkup)
-    .onRequestTo('http://dummy-url.com/get')
+    .onRequestTo(DUMMY_URLS.secureGet)
     .respond('Data from mocked fetch request')
-    .onRequestTo('https://another-dummy-url.com')
+    .onRequestTo(DUMMY_URLS.another)
     .respond();
 
 fixture `Basic`;
@@ -35,10 +36,10 @@ test
     .requestHooks(requestMock)
     ('Basic', async t => {
         await t
-            .navigateTo('http://dummy-url.com')
+            .navigateTo(DUMMY_URLS.secureMain)
             .expect(Selector('h1').textContent).eql('Mocked page')
             .click('button')
             .expect(Selector('h2').textContent).eql('Data from mocked fetch request')
-            .navigateTo('https://another-dummy-url.com')
+            .navigateTo(DUMMY_URLS.another)
             .expect(Selector('body').exists).ok();
     });

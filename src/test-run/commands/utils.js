@@ -12,7 +12,7 @@ export function isCommandRejectableByPageError (command) {
            && !isWindowSwitchingCommand(command);
 }
 
-function isClientFunctionCommand (command) {
+export function isClientFunctionCommand (command) {
     return command.type === TYPE.executeClientFunction ||
            command.type === TYPE.executeSelector;
 }
@@ -58,7 +58,8 @@ export function isServiceCommand (command) {
            command.type === TYPE.hideAssertionRetriesStatus ||
            command.type === TYPE.setBreakpoint ||
            command.type === TYPE.takeScreenshotOnFail ||
-           command.type === TYPE.recorder;
+           command.type === TYPE.recorder ||
+           command.type === TYPE.getProxyUrl;
 }
 
 export function isExecutableInTopWindowOnly (command) {
@@ -85,5 +86,7 @@ export function isExecutableOnClientCommand (command) {
            command.type !== TYPE.useRole &&
            command.type !== TYPE.assertion &&
            command.type !== TYPE.executeExpression &&
-           command.type !== TYPE.executeAsyncExpression;
+           command.type !== TYPE.executeAsyncExpression &&
+           command.type !== TYPE.addRequestHooks &&
+           command.type !== TYPE.removeRequestHooks;
 }

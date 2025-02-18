@@ -8,11 +8,14 @@ import {
     replaceLeadingSpacesWithNbsp,
     formatExpressionMessage,
 } from './utils';
+import { getConcatenatedValuesString } from '../../utils/string';
+
 
 const EXTERNAL_LINKS = {
     createNewIssue:      'https://github.com/DevExpress/testcafe/issues/new?template=bug-report.md',
     troubleshootNetwork: 'https://go.devexpress.com/TestCafe_FAQ_ARequestHasFailed.aspx',
     viewportSizes:       'https://github.com/DevExpress/device-specs/blob/master/viewport-sizes.json',
+    skipJsErrorsRecipes: 'https://testcafe.io/documentation/404038/recipes/debugging/skip-javascript-errors',
 };
 
 export default {
@@ -44,7 +47,7 @@ export default {
     [TEST_RUN_ERRORS.uncaughtErrorOnPage]: err => `
         A JavaScript error occurred on ${formatUrl(err.pageDestUrl)}.
         Repeat test actions in the browser and check the console for errors.
-        To ignore client-side JavaScript errors, enable the "--skip-js-errors" CLI option, or set the "skipJsErrors" configuration file property to "true".
+        Enable the “skipJsErrors” option to ignore JavaScript errors during test execution. Learn more: ${formatUrl(EXTERNAL_LINKS.skipJsErrorsRecipes)}
         If the website only throws this error when you test it with TestCafe, please create a new issue at:
         ${formatUrl(EXTERNAL_LINKS.createNewIssue)}.
 
@@ -130,6 +133,26 @@ export default {
         Elements of the "${err.argumentName}" argument are expected to be non-empty strings, but the element at index ${err.elementIndex} was ${err.actualValue}.
     `,
 
+    [TEST_RUN_ERRORS.actionRequiredCookieArguments]: () => `
+        The mandatory "cookies" argument is missing.
+    `,
+
+    [TEST_RUN_ERRORS.actionCookieArgumentError]: () => `
+        The value of the "cookies" argument does not belong to an acceptable data type: Object, String, or Array of objects or strings.
+    `,
+
+    [TEST_RUN_ERRORS.actionCookieArgumentsError]: err => `
+        The value of cookie number ${err.index + 1} (${err.actualValue}) does not belong to an acceptable data type: Object or String.
+    `,
+
+    [TEST_RUN_ERRORS.actionUrlCookieArgumentError]: () => `
+        Could not parse the url parameter. Check the value for formatting errors.
+    `,
+
+    [TEST_RUN_ERRORS.actionUrlsCookieArgumentError]: err => `
+        Could not parse url number ${err.index + 1} (${err.actualValue}). Check the value for formatting errors.
+    `,
+
     [TEST_RUN_ERRORS.actionIntegerArgumentError]: err => `
         The "${err.argumentName}" argument is expected to be an integer, but it was ${err.actualValue}.
     `,
@@ -152,8 +175,12 @@ export default {
         ${formatSelectorCallstack(err.apiFnChain, err.apiFnIndex, viewportWidth)}
     `,
 
-    [TEST_RUN_ERRORS.actionElementIsInvisibleError]: () => `
-        The element that matches the specified selector is not visible.
+    [TEST_RUN_ERRORS.actionElementIsInvisibleError]: err => `
+        ${escapeHtml(err.reason) || 'The element that matches the specified selector is not visible.'}
+    `,
+
+    [TEST_RUN_ERRORS.actionElementIsNotTargetError]: () => `
+        The element that matches the specified selector is covered.
     `,
 
     [TEST_RUN_ERRORS.actionSelectorMatchesWrongNodeTypeError]: err => `
@@ -167,7 +194,7 @@ export default {
     `,
 
     [TEST_RUN_ERRORS.actionAdditionalElementIsInvisibleError]: err => `
-        The element that matches the specified "${err.argumentName}" is not visible.
+        ${escapeHtml(err.reason) || `The element that matches the specified "${err.argumentName}" is not visible.`}
     `,
 
     [TEST_RUN_ERRORS.actionAdditionalSelectorMatchesWrongNodeTypeError]: err => `
@@ -379,11 +406,66 @@ export default {
         Multi-window mode is supported only in locally-installed Chrome, Chromium, Edge 84+ and Firefox. Run tests in these browsers to use the "${err.methodName}" method.
     `,
 
+    [TEST_RUN_ERRORS.multipleWindowsModeIsNotSupportedInNativeAutomationError]: () => `
+        The Native Automation mode does not support the use of multiple browser windows. Use the "disable native automation" option to continue.
+    `,
+
     [TEST_RUN_ERRORS.cannotCloseWindowWithoutParent]: () => `
         Cannot close the window because it does not have a parent. The parent window was closed or you are attempting to close the root browser window where tests were launched.
     `,
 
     [TEST_RUN_ERRORS.cannotRestoreChildWindowError]: () => `
         Failed to restore connection to window within the allocated timeout.
+    `,
+
+    [TEST_RUN_ERRORS.executionTimeoutExceeded]: err => {
+        return `${err.scope} timeout of ${err.timeout}ms exceeded.`;
+    },
+
+    [TEST_RUN_ERRORS.actionStringOptionError]: err => `
+        The value of the "${err.optionName}" option belongs to an unsupported data type (${err.actualValue}). The "${err.optionName}" option only accepts String type values.
+    `,
+
+    [TEST_RUN_ERRORS.actionStringOrRegexOptionError]: err => `
+        The value of the "${err.optionName}" option belongs to an unsupported data type (${err.actualValue}). The "${err.optionName}" option only accepts String or Regex type values.
+    `,
+
+    [TEST_RUN_ERRORS.actionDateOptionError]: err => `
+        The value of the "${err.optionName}" option belongs to an unsupported data type (${err.actualValue}). The "${err.optionName}" option only accepts Date type values.
+    `,
+
+    [TEST_RUN_ERRORS.actionNumberOptionError]: err => `
+        The value of the "${err.optionName}" option belongs to an unsupported data type (${err.actualValue}). The "${err.optionName}" option only accepts Number type values.
+    `,
+
+    [TEST_RUN_ERRORS.actionUrlOptionError]: err => `
+        The value of the "${err.optionName}" option belongs to an unsupported data type (${err.actualValue}). The "${err.optionName}" option only accepts string or URL types values.
+    `,
+
+    [TEST_RUN_ERRORS.actionUrlSearchParamsOptionError]: err => `
+        The value of the "${err.optionName}" option belongs to an unsupported data type (${err.actualValue}). The "${err.optionName}" option only accepts object or URLSearchParams types values.
+    `,
+
+    [TEST_RUN_ERRORS.actionObjectOptionError]: err => `
+        The value of the "${err.optionName}" option belongs to an unsupported data type (${err.actualValue}). The "${err.optionName}" option only accepts object types values.
+    `,
+
+    [TEST_RUN_ERRORS.actionUrlArgumentError]: err => `
+        The "${err.argumentName}" argument is expected to be an URL or a string, but it was ${err.actualValue}.
+    `,
+
+    [TEST_RUN_ERRORS.actionSkipJsErrorsArgumentError]: err => `
+        Cannot execute the skipJsErrors method. The value of the "${err.argumentName}" argument belongs to an unsupported type (${err.actualValue}). The "${err.argumentName}" supports the following data types: Boolean, Object, Function.
+    `,
+
+    [TEST_RUN_ERRORS.actionFunctionOptionError]: err => `
+        The value of the "${err.optionName}" option belongs to an unsupported data type (${err.actualValue}). The "${err.optionName}" option only accepts function types values.
+    `,
+
+    [TEST_RUN_ERRORS.actionInvalidObjectPropertyError]: err => `
+        The "${err.objectName}" object does not support the "${err.propertyName}" property.
+        To proceed, remove invalid options from your code or check your test for spelling errors.
+        The "${err.objectName}" object supports the following options:
+        ${getConcatenatedValuesString(err.availableProperties, ',\n')}.
     `,
 };

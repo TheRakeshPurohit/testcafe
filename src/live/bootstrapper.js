@@ -7,18 +7,18 @@ import cacheProxy from './../compiler/test-file/cache-proxy';
 const originalRequire = Module.prototype.require;
 
 class LiveModeBootstrapper extends Bootstrapper {
-    constructor (runner, browserConnectionGateway) {
-        super({ browserConnectionGateway });
+    constructor (runner, browserConnectionGateway, messageBus) {
+        super({ browserConnectionGateway, messageBus });
 
         this.runner = runner;
 
         cacheProxy.preventCaching();
     }
 
-    _getTests () {
+    _getTests (id) {
         this._mockRequire();
 
-        return super._getTests()
+        return super._getTests(id)
             .then(result => {
                 this._restoreRequire();
 

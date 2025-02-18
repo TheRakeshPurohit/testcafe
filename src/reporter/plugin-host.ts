@@ -1,5 +1,6 @@
 import chalk, { Chalk } from 'chalk';
 import indentString from 'indent-string';
+import callsite from 'callsite';
 
 import {
     identity,
@@ -8,7 +9,6 @@ import {
 } from 'lodash';
 
 import moment from '../utils/moment-loader';
-import OS from 'os-family';
 import { wordWrap, removeTTYColors } from '../utils/string';
 import getViewportWidth from '../utils/get-viewport-width';
 import { DIFF_COLORS } from '../utils/diff/colors';
@@ -16,6 +16,10 @@ import { Moment } from 'moment';
 import ReporterStreamController from '../runner/reporter-stream-controller';
 import { Writable } from 'stream';
 import TestRunErrorFormattableAdapter from '../errors/test-run/formattable-adapter';
+import REPORTER_SYMBOLS from '../reporter/symbols';
+import { ReporterSymbols } from './interfaces';
+import { ReporterPluginHooks, WriteInfo } from './index';
+import ReporterPluginMethod from './plugin-methods';
 
 // NOTE: we should not expose internal state to
 // the plugin, to avoid accidental rewrites.
@@ -24,11 +28,6 @@ const stream          = Symbol();
 const wordWrapEnabled = Symbol();
 const indent          = Symbol();
 const errorDecorator  = Symbol();
-
-interface ReporterSymbols {
-    ok: string;
-    err: string;
-}
 
 export default class ReporterPluginHost {
     public name?: string;
@@ -41,8 +40,9 @@ export default class ReporterPluginHost {
     private [wordWrapEnabled]: boolean;
     private [indent]: number;
     private [errorDecorator]: Record<string, Function>;
+    private _hooks: ReporterPluginHooks | undefined;
 
-    public constructor (plugin: any, outStream?: Writable, name?: string) {
+    public constructor (plugin: any, outStream?: Writable, name?: string, pluginHooks?: ReporterPluginHooks) {
         this.name             = name;
         this.streamController = null;
         this[stream]          = outStream || process.stdout;
@@ -54,12 +54,11 @@ export default class ReporterPluginHost {
         this.chalk         = new chalk.constructor({ enabled: useColors });
         this.moment        = moment;
         this.viewportWidth = getViewportWidth(this[stream]);
-
-        this.symbols = OS.win ?
-            { ok: '√', err: '×' } :
-            { ok: '✓', err: '✖' };
+        this.symbols       = Object.assign({}, REPORTER_SYMBOLS);
 
         assignIn(this, plugin);
+
+        this._hooks = pluginHooks;
 
         this[errorDecorator] = this.createErrorDecorator();
     }
@@ -142,13 +141,20 @@ export default class ReporterPluginHost {
         return this;
     }
 
-    public write (text: string): ReporterPluginHost {
+    public write (text: string, data?: any): ReporterPluginHost {
         if (this[wordWrapEnabled])
             text = this.wordWrap(text, this[indent], this.viewportWidth);
         else
             text = this.indentString(text, this[indent]);
 
-        this._writeToUniqueStream(text);
+        if (this._hooks?.onBeforeWrite) {
+            const writeInfo = this._createBeforeWriteInfo(text, data);
+
+            this._hooks.onBeforeWrite(writeInfo);
+            this._writeToUniqueStream(writeInfo.formattedText);
+        }
+        else
+            this._writeToUniqueStream(text);
 
         return this;
     }
@@ -163,6 +169,28 @@ export default class ReporterPluginHost {
         this[indent] = val;
 
         return this;
+    }
+
+    private _createBeforeWriteInfo (formattedText: string, data: any = {}): WriteInfo {
+        const initiator = data.initiator || this._getWriteInitiatorEvent();
+
+        return {
+            formatOptions: {
+                indent:      this[indent],
+                useWordWrap: this[wordWrapEnabled],
+            },
+            formattedText,
+            initiator,
+            data,
+        };
+    }
+
+    private _getWriteInitiatorEvent (): string {
+        const pluginMethods = Object.keys(ReporterPluginMethod);
+        const funcNames = callsite().map(site => site.getFunctionName());
+        const initiator = funcNames.find(funcName => pluginMethods.some(methodName => methodName === funcName));
+
+        return initiator || '';
     }
 
     private _writeToUniqueStream (text: string): void {
@@ -194,7 +222,15 @@ export default class ReporterPluginHost {
     }
 
     // NOTE: It's an optional method
-    public async reportWarnings (/* warnings */): Promise<void> {
-        return Promise.resolve();
+    public async init (/* testcafeVersion */): Promise<void> { // eslint-disable-line @typescript-eslint/no-empty-function
+        // Optional
+    }
+
+    // NOTE: It's an optional method
+    public async reportWarnings (/* warnings */): Promise<void> { // eslint-disable-line @typescript-eslint/no-empty-function
+    }
+
+    // NOTE: It's an optional method
+    public async reportData (/* testRun, ...data */): Promise<void> { // eslint-disable-line @typescript-eslint/no-empty-function
     }
 }

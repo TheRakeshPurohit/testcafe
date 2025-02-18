@@ -75,8 +75,7 @@ $(document).ready(function () {
         equal(textSelection.getSelectionStart(activeElement), selectionStart, 'active element selection start are correct');
         equal(textSelection.getSelectionEnd(activeElement), selectionEnd, 'active element selection end are correct');
 
-        if (!window.DIRECTION_ALWAYS_IS_FORWARD)
-            ok(inverseSelection === (typeof inverse === 'undefined' ? false : inverse));
+        ok(inverseSelection === (typeof inverse === 'undefined' ? false : inverse));
     };
 
     const runPressAutomation = function (keySequence, callback) {
@@ -136,7 +135,7 @@ $(document).ready(function () {
         runPressAutomation('ctrl+a backspace', function () {
             equal(keydownCount, 3, 'keydown event raises twice');
             equal(keyupCount, 3, 'keyup event raises twice');
-            equal(keypressCount, browserUtils.isFirefox ? 2 : 0, 'keypress event raises twice');
+            equal(keypressCount, 0, 'keypress event is not raised');
             start();
         });
     });

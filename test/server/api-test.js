@@ -1,10 +1,13 @@
-const expect         = require('chai').expect;
-const proxyquire     = require('proxyquire');
-const sinon          = require('sinon');
-const resolve        = require('path').resolve;
-const assertAPIError = require('./helpers/assert-runtime-error').assertAPIError;
-const compile        = require('./helpers/compile');
-const OPTION_NAMES   = require('../../lib/configuration/option-names');
+const { expect }          = require('chai');
+const proxyquire          = require('proxyquire');
+const sinon               = require('sinon');
+const { resolve }         = require('path');
+const { assertAPIError }  = require('./helpers/assert-runtime-error');
+const compile             = require('./helpers/compile');
+const OPTION_NAMES        = require('../../lib/configuration/option-names');
+const Compiler            = require('../../lib/compiler');
+const { RUNTIME_ERRORS }  = require('../../lib/errors/types');
+const Fixture             = require('../../lib/api/structure/fixture');
 
 
 describe('API', function () {
@@ -372,6 +375,129 @@ describe('API', function () {
                                   '   4 |\n' +
                                   '   5 |test(\'test\', async t => {});\n' +
                                   '   6 |',
+                    });
+                });
+        });
+
+        it('Should set the page url for all fixture tests if the baseUrl is specified', () => {
+            const testfile = resolve('test/server/data/test-suites/fixture-without-page/testfile.js');
+
+            return compile(testfile, { }, { baseUrl: 'example.org' })
+                .then(function (compiled) {
+                    expect(compiled.fixtures[0].pageUrl).eql('http://example.org');
+                    expect(compiled.tests[0].pageUrl).eql('http://example.org');
+                    expect(compiled.tests[1].pageUrl).eql('http://example.org/index.html');
+                });
+        });
+
+        it('Should raise an error if baseUrl is relative', () => {
+            const testfile = resolve('test/server/data/test-suites/fixture-without-page/testfile.js');
+            const createCompiler = () => new Compiler(testfile, {}, { baseUrl: './example.org' });
+
+            try {
+                createCompiler();
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                const message = 'Cannot prepare tests due to the following error:\n\n' +
+                    'The value of the baseUrl argument cannot be relative: "./example.org"';
+                const code = RUNTIME_ERRORS.relativeBaseUrl;
+
+                expect(err.message).eql(message);
+                expect(err.code).eql(code);
+            }
+        });
+        it('Should raise an error if baseUrl contains unsupported protocol', () => {
+            const testfile = resolve('test/server/data/test-suites/fixture-without-page/testfile.js');
+            const createCompiler = () => new Compiler(testfile, {}, { baseUrl: 'mail://example.org' });
+
+            try {
+                createCompiler();
+
+                throw new Error('Promise rejection expected');
+            }
+            catch (err) {
+                const message = 'Cannot prepare tests due to the following error:\n\n' +
+                    'Invalid base URL: "mail://example.org". TestCafe cannot execute the test because the base URL includes the mail protocol. TestCafe supports the following protocols: http://, https:// and file://.';
+                const code = RUNTIME_ERRORS.unsupportedUrlProtocol;
+
+                expect(err.message).eql(message);
+                expect(err.code).eql(code);
+            }
+        });
+
+        it('Should raise an error if "fixture.skipJsErrors" method argument has invalid value type', () => {
+            const testfile = resolve('test/server/data/test-suites/skip-js-errors/fixture-invalid-argument.js');
+
+            return compile(testfile)
+                .then(() => {
+                    throw new Error('Promise rejection expected');
+                })
+                .catch(err => {
+                    assertAPIError(err, {
+                        stackTop: testfile,
+
+                        message: 'Cannot prepare tests due to the following error:\n\n' +
+                                 'The skipJsErrors options argument (string) is not of expected type (boolean, non-null object or a function).',
+
+                        callsite: '   1 |fixture`SkipJsErrors API`\n' +
+                                  ' > 2 |    .skipJsErrors(\'test\');\n' +
+                                  '   3 |\n' +
+                                  '   4 |test(\'test\', () => {\n' +
+                                  '   5 |\n' +
+                                  '   6 |})\n' +
+                                  '   7 |\n',
+                    });
+                });
+        });
+
+        it('Should raise an error if "fixture.skipJsErrors" method argument has invalid SkipJsErrorsOptionsObject structure', () => {
+            const testfile = resolve('test/server/data/test-suites/skip-js-errors/fixture-options-object-argument.js');
+
+            return compile(testfile)
+                .then(() => {
+                    throw new Error('Promise rejection expected');
+                })
+                .catch(err => {
+                    assertAPIError(err, {
+                        stackTop: testfile,
+
+                        message: 'Cannot prepare tests due to the following error:\n\n' +
+                                 'The "invalidProp" option does not exist. Use the following options to configure skipJsErrors: "message", "stack", and "pageUrl".',
+
+                        callsite: '   1 |fixture`SkipJsErrors API`\n' +
+                                  ' > 2 |    .skipJsErrors({ message: \'test\', invalidProp: false });\n' +
+                                  '   3 |\n' +
+                                  '   4 |test(\'test\', () => {\n' +
+                                  '   5 |\n' +
+                                  '   6 |})\n' +
+                                  '   7 |\n',
+                    });
+                });
+        });
+
+        it('Should raise an error if "fixture.skipJsErrors" method argument has invalid SkipJsErrorsCallbackWithOptionsObject structure', () => {
+            const testfile = resolve('test/server/data/test-suites/skip-js-errors/fixture-function-with-options-object-argument.js');
+
+            return compile(testfile)
+                .then(() => {
+                    throw new Error('Promise rejection expected');
+                })
+                .catch(err => {
+                    assertAPIError(err, {
+                        stackTop: testfile,
+
+                        message: 'Cannot prepare tests due to the following error:\n\n' +
+                                 'The "invalidProp" option does not exist. Use the following options to configure skipJsErrors callbacks: "fn" and "dependencies".',
+
+                        callsite: '   1 |fixture`SkipJsErrors API`\n' +
+                                  ' > 2 |    .skipJsErrors({ fn: () => true, invalidProp: false });\n' +
+                                  '   3 |\n' +
+                                  '   4 |test(\'test\', () => {\n' +
+                                  '   5 |\n' +
+                                  '   6 |})\n' +
+                                  '   7 |\n',
                     });
                 });
         });
@@ -1543,7 +1669,7 @@ describe('API', function () {
                         stackTop: testfile,
 
                         message: 'Cannot prepare tests due to the following error:\n\n' +
-                                 "Cannot implicitly resolve the test run in the context of which the test controller action should be executed. Use test function's 't' argument instead.",
+                                 "The action does not have implicit test controller access. Reference the 't' object to gain it.",
 
                         callsite: '    1 |import { t } from \'testcafe\';\n' +
                                   '    2 |\n' +
@@ -1674,18 +1800,27 @@ describe('API', function () {
     });
 
     describe('createTestCafe', () => {
-        it('Should accept configuration as an arguments array', async () => {
+        function getMockedCreateTestCafe () {
             const TestCafe = sinon.stub().returns({});
 
             const createTestCafe = proxyquire('../..', {
                 './testcafe':      TestCafe,
                 'async-exit-hook': () => {},
 
-                'endpoint-utils': {
-                    isMyHostname: sinon.stub().resolves(true),
-                    isFreePort:   sinon.stub().resolves(true),
+                './configuration/utils': {
+                    getValidHostname: val => val,
+                    getValidPort:     val => val,
                 },
             });
+
+            return {
+                TestCafe,
+                createTestCafe,
+            };
+        }
+
+        it('Should accept configuration as an arguments array', async () => {
+            const { createTestCafe, TestCafe } = getMockedCreateTestCafe();
 
             await createTestCafe('my-host', 1337, 1338, { test: 42 }, true, true);
 
@@ -1701,17 +1836,7 @@ describe('API', function () {
         });
 
         it('Should accept configuration as an object', async () => {
-            const TestCafe = sinon.stub().returns({});
-
-            const createTestCafe = proxyquire('../..', {
-                './testcafe':      TestCafe,
-                'async-exit-hook': () => {},
-
-                'endpoint-utils': {
-                    isMyHostname: sinon.stub().resolves(true),
-                    isFreePort:   sinon.stub().resolves(true),
-                },
-            });
+            const { createTestCafe, TestCafe } = getMockedCreateTestCafe();
 
             await createTestCafe({
                 hostname: 'my-host',
@@ -1725,7 +1850,6 @@ describe('API', function () {
                 developmentMode: true,
                 retryTestPages:  true,
                 disableHttp2:    true,
-                proxyless:       true,
             });
 
             const configuration = TestCafe.firstCall.args[0];
@@ -1737,7 +1861,28 @@ describe('API', function () {
             expect(configuration.getOption(OPTION_NAMES.developmentMode)).be.true;
             expect(configuration.getOption(OPTION_NAMES.retryTestPages)).be.true;
             expect(configuration.getOption(OPTION_NAMES.disableHttp2)).be.true;
-            expect(configuration.getOption(OPTION_NAMES.proxyless)).be.true;
+        });
+    });
+
+    describe('API Methods Validation', () => {
+        it('Should checks all methods', async () => {
+            const GETTER_API_METHODS    = ['only', 'skip', 'disablePageReloads', 'enablePageReloads', 'disablePageCaching', 'disableConcurrency'];
+            const FUNCTIONS_API_METHODS = ['page', 'skipJsErrors', 'httpAuth', 'meta', 'before', 'after', 'beforeEach', 'afterEach', 'requestHooks', 'clientScripts'];
+
+            for (const apiMethod of Fixture.API_LIST) {
+                if (!GETTER_API_METHODS.includes(apiMethod.apiProp) && !FUNCTIONS_API_METHODS.includes(apiMethod.apiProp)) {
+                    throw new Error(`Please, check the "${apiMethod.srcProp}" method.
+                    If the method doesn't accept any arguments, ensure that the method is implemented as a 'getter' and add the method name to GETTER_API_METHODS.
+                    If the method accepts arguments, ensure that the method is implemented as a 'function' and add the method name to FUNCTIONS_API_METHODS.
+                    `);
+                }
+
+                if (GETTER_API_METHODS.includes(apiMethod.apiProp) && apiMethod.accessor !== 'getter')
+                    throw new Error(`Make sure that the method "${apiMethod.srcProp}" is implemented as a "getter"`);
+
+                if (FUNCTIONS_API_METHODS.includes(apiMethod.apiProp) && apiMethod.accessor)
+                    throw new Error(`Make sure that the method "${apiMethod.srcProp}" is implemented as a "function"`);
+            }
         });
     });
 });

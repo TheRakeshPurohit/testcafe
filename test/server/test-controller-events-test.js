@@ -43,6 +43,17 @@ class TestControllerMock extends TestController {
 
         testRun.controller = this;
     }
+
+    _createCommand (CmdCtor, cmdArgs, callsite) {
+        const command = super._createCommand(CmdCtor, cmdArgs, callsite);
+
+        if (!command.actionId)
+            throw new Error('command does not have action id');
+
+        command.actionId = CmdCtor.name;
+
+        return command;
+    }
 }
 
 class TaskMock extends AsyncEventEmitter {
@@ -59,21 +70,6 @@ class TaskMock extends AsyncEventEmitter {
         Task.prototype._assignBrowserJobEventHandlers.call(this, job);
     }
 }
-
-const options = {
-    caretPos:  1,
-    modifiers: {
-        alt:   true,
-        ctrl:  true,
-        shift: true,
-    },
-    offsetX:            1,
-    offsetY:            2,
-    destinationOffsetX: 3,
-    speed:              1,
-    replace:            true,
-    paste:              true,
-};
 
 const actionsWithoutOptions = {
     click:                   ['#target'],
@@ -92,22 +88,31 @@ const actionsWithoutOptions = {
     resizeWindowToFitDevice: ['Sony Xperia Z'],
 };
 
+const {
+    basicOptions,
+    clickOptions,
+    mouseOptions,
+    offsetOptions,
+    dragToElementOptions,
+    typeTextOptions,
+} = require('./data/test-controller-reporter-expected');
+
 const actions = {
     dispatchEvent:             ['#target', 'mousedown'],
-    click:                     ['#target', options],
-    rightClick:                ['#target', options],
-    doubleClick:               ['#target', options],
-    hover:                     ['#target', options],
-    drag:                      ['#target', 100, 200, options],
-    dragToElement:             ['#target', '#target', options],
-    scroll:                    ['#target', 100, 200, options],
-    scrollBy:                  ['#target', 100, 200, options],
-    scrollIntoView:            ['#target', options],
-    typeText:                  ['#input', 'test', options],
-    selectText:                ['#input', 1, 3, options],
-    selectTextAreaContent:     ['#textarea', 1, 2, 3, 4, options],
-    selectEditableContent:     ['#contenteditable', '#contenteditable', options],
-    pressKey:                  ['enter', options],
+    click:                     ['#target', clickOptions],
+    rightClick:                ['#target', clickOptions],
+    doubleClick:               ['#target', clickOptions],
+    hover:                     ['#target', mouseOptions],
+    drag:                      ['#target', 100, 200, mouseOptions],
+    dragToElement:             ['#target', '#target', dragToElementOptions],
+    scroll:                    ['#target', 100, 200, offsetOptions],
+    scrollBy:                  ['#target', 100, 200, offsetOptions],
+    scrollIntoView:            ['#target', offsetOptions],
+    typeText:                  ['#input', 'test', typeTextOptions],
+    selectText:                ['#input', 1, 3, basicOptions],
+    selectTextAreaContent:     ['#textarea', 1, 2, 3, 4, basicOptions],
+    selectEditableContent:     ['#contenteditable', '#contenteditable', basicOptions],
+    pressKey:                  ['enter', basicOptions],
     wait:                      [1],
     navigateTo:                ['./index.html'],
     setFilesToUpload:          ['#file', '../test.js'],
@@ -123,6 +128,7 @@ const actions = {
     switchToWindow:            [{ id: 'window-id' }],
     closeWindow:               [{ id: 'window-id' }],
     getCurrentWindow:          [],
+    getCurrentCDPSession:      [],
     switchToParentWindow:      [],
     switchToPreviousWindow:    [],
     setNativeDialogHandler:    [() => true],
@@ -132,14 +138,19 @@ const actions = {
     setTestSpeed:              [1],
     setPageLoadTimeout:        [1],
     useRole:                   [new Role('http://example.com', async () => {}, { preserveUrl: true })],
+    getCookies:                ['cookieName', 'https://domain.com'],
+    setCookies:                [{ cookieName: 'cookieValue' }, 'https://domain.com'],
+    deleteCookies:             [['cookieName1', 'cookieName2'], 'https://domain.com'],
+    skipJsErrors:              [true],
+    report:                    [],
 };
 
 let testController = null;
 let task           = null;
 let messageBus     = null;
 
-const initializeReporter = (reporter) => {
-    return new Reporter(reporter, messageBus);
+const initializeReporter = (plugin) => {
+    return new Reporter({ plugin, messageBus });
 };
 
 describe('TestController action events', () => {
@@ -187,9 +198,9 @@ describe('TestController action events', () => {
 
         await messageBus.emit('start', task);
 
-        // eval and expect has their functional tests
+        // eval, expect and request has their functional tests
         // addRequestHooks/removeRequestHooks are not logged
-        const exceptions = ['eval', 'expect', 'addRequestHooks', 'removeRequestHooks'];
+        const exceptions = ['eval', 'expect', 'addRequestHooks', 'removeRequestHooks', 'request'];
 
         const props = TestController.API_LIST
             .filter(prop => !prop.accessor)
@@ -211,9 +222,9 @@ describe('TestController action events', () => {
         expect(actionsKeys.length).eql(doneLog.length);
         expect(startLog).eql(actionsKeys);
 
-        const expected = require('./data/test-controller-reporter-expected');
+        const { expectedLog } = require('./data/test-controller-reporter-expected');
 
-        expect(doneLog).eql(expected);
+        expect(doneLog).eql(expectedLog);
     });
 
     it('Error action', async () => {

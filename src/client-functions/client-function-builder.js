@@ -2,7 +2,7 @@ import { isNil as isNullOrUndefined, assign } from 'lodash';
 import testRunTracker from '../api/test-run-tracker';
 import functionBuilderSymbol from './builder-symbol';
 import { createReplicator, FunctionTransform } from './replicator';
-import { ExecuteClientFunctionCommand } from '../test-run/commands/observation';
+import { ExecuteClientFunctionCommand } from '../test-run/commands/execute-client-function';
 import compileClientFunction from '../compiler/compile-client-function';
 import { APIError, ClientFunctionAPIError } from '../errors/runtime';
 import { assertType, is } from '../errors/runtime/type-assertions';
@@ -10,7 +10,8 @@ import { RUNTIME_ERRORS } from '../errors/types';
 import { getCallsiteForMethod } from '../errors/get-callsite';
 import ReExecutablePromise from '../utils/re-executable-promise';
 import testRunMarker from '../test-run/marker-symbol';
-import selectorApiExecutionMode from './selector-api-execution-mode';
+import TEMPLATES from '../errors/test-run/templates';
+import dedent from 'dedent';
 
 const DEFAULT_EXECUTION_CALLSITE_NAME = '__$$clientFunction$$';
 
@@ -34,6 +35,15 @@ export default class ClientFunctionBuilder {
             throw this._createInvalidFnTypeError();
 
         this.replicator = createReplicator(this._getReplicatorTransforms());
+    }
+
+    _renderError (error) {
+        // The rendered template is shown in the Watch panel of browser dev tools or IDE.
+        // Viewport size is unlimited there.
+        const viewportWidth   = Number.MIN_SAFE_INTEGER;
+        const renderedMessage = TEMPLATES[error.code](error, viewportWidth);
+
+        return dedent(renderedMessage);
     }
 
     _decorateFunction (clientFn) {
@@ -84,9 +94,6 @@ export default class ClientFunctionBuilder {
             for (let i = 0; i < arguments.length; i++)
                 args.push(arguments[i]);
 
-            if (selectorApiExecutionMode.isSync)
-                return builder._executeCommandSync(args, testRun, callsite);
-
             return builder._executeCommand(args, testRun, callsite);
         };
 
@@ -95,7 +102,7 @@ export default class ClientFunctionBuilder {
         return clientFn;
     }
 
-    getCommand (args) {
+    getCommand (args = []) {
         const encodedArgs         = this.replicator.encode(args);
         const encodedDependencies = this.replicator.encode(this.getFunctionDependencies());
 
@@ -150,27 +157,14 @@ export default class ClientFunctionBuilder {
         });
     }
 
-    _executeCommandSync (args, testRun, callsite) {
-        // NOTE: should be kept outside of lazy promise to preserve
-        // correct callsite in case of replicator error.
-        const command = this.getCommand(args);
-
-        if (!testRun) {
-            const err = new ClientFunctionAPIError(this.callsiteNames.execution, this.callsiteNames.instantiation, RUNTIME_ERRORS.clientFunctionCannotResolveTestRun);
-
-            // NOTE: force callsite here, because more likely it will
-            // be impossible to resolve it by method name from a lazy promise.
-            err.callsite = callsite;
-
-            throw err;
-        }
-
-        const result = testRun.executeCommandSync(command, callsite);
-
-        return this._processResult(result, args);
-    }
-
     _processResult (result) {
+        // HACK: in some cases related to navigation from ClientFunction or removing target iframe for the ClientFunction
+        // we get an invalid result from the replicator on the client side.
+        // I didn't find a stable reproduction scenario.
+        // So, I just added a hack for this case.
+        if (result === null)
+            result = [result];
+
         return this.replicator.decode(result);
     }
 

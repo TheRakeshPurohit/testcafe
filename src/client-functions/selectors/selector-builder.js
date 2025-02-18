@@ -6,13 +6,13 @@ import { ClientFunctionAPIError } from '../../errors/runtime';
 import functionBuilderSymbol from '../builder-symbol';
 import { RUNTIME_ERRORS } from '../../errors/types';
 import { assertType, is } from '../../errors/runtime/type-assertions';
-import { ExecuteSelectorCommand } from '../../test-run/commands/observation';
+import { ExecuteSelectorCommand } from '../../test-run/commands/execute-client-function';
 import defineLazyProperty from '../../utils/define-lazy-property';
 import { addAPI, addCustomMethods } from './add-api';
 import createSnapshotMethods from './create-snapshot-methods';
 import prepareApiFnArgs from './prepare-api-args';
 import returnSinglePropMode from '../return-single-prop-mode';
-import selectorApiExecutionMode from '../selector-api-execution-mode';
+import escapeUnsafeChars from '../../utils/escape-unsafe-chars';
 
 export default class SelectorBuilder extends ClientFunctionBuilder {
     constructor (fn, options, callsiteNames, callsite) {
@@ -61,7 +61,7 @@ export default class SelectorBuilder extends ClientFunctionBuilder {
             return this.options.sourceSelectorBuilder.compiledFnCode;
 
         const code = typeof this.fn === 'string' ?
-            `(function(){return document.querySelectorAll(${JSON.stringify(this.fn)});});` :
+            `(function(){return document.querySelectorAll(${escapeUnsafeChars(JSON.stringify(this.fn))});});` :
             super._getCompiledFnCode();
 
         if (code) {
@@ -156,6 +156,7 @@ export default class SelectorBuilder extends ClientFunctionBuilder {
             apiFnChain:                this.options.apiFnChain,
             visibilityCheck:           !!this.options.visibilityCheck,
             timeout:                   this.options.timeout,
+            strictError:               this.options.strictError,
         });
     }
 
@@ -214,18 +215,6 @@ export default class SelectorBuilder extends ClientFunctionBuilder {
 
             if (this.options.customMethods)
                 addCustomMethods(snapshot, () => snapshot.selector, SelectorBuilder, this.options.customMethods);
-
-            if (selectorApiExecutionMode.isSync) {
-                addAPI(
-                    snapshot,
-                    () => snapshot.selector,
-                    SelectorBuilder,
-                    this.options.customDOMProperties,
-                    this.options.customMethods,
-                    this._getObservedCallsites(),
-                    true
-                );
-            }
         }
 
         return snapshot;

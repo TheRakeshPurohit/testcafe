@@ -8,7 +8,11 @@ import {
 } from '../../errors/runtime';
 
 import { UncaughtErrorInCustomScript, UncaughtTestCafeErrorInCustomScript } from '../../errors/test-run';
-import { setContextOptions, DEFAULT_CONTEXT_OPTIONS } from '../../api/test-controller/execution-context';
+import {
+    setContextOptions,
+    DEFAULT_CONTEXT_OPTIONS,
+    createExecutionContext,
+} from '../../api/test-controller/execution-context';
 
 import {
     ERROR_LINE_COLUMN_REGEXP,
@@ -16,9 +20,11 @@ import {
     ERROR_LINE_OFFSET,
 } from './constants';
 
+import TestRunTracker from '../../api/test-run-tracker';
+
 // NOTE: do not beautify this code since offsets for error lines and columns are coded here
-function wrapInAsync (expression) {
-    return '(async function() {\n' +
+function wrapInAsync (expression, testRunId) {
+    return `(async function ${TestRunTracker.getMarkedFnName(testRunId)} () {\n` +
            expression + ';\n' +
            '});';
 }
@@ -76,7 +82,10 @@ function isRuntimeError (err) {
 }
 
 export function executeJsExpression (expression, testRun, options) {
-    const context      = getExecutionContext(testRun.controller, options);
+    const context = testRun.controller ?
+        getExecutionContext(testRun.controller, options) :
+        createExecutionContext(testRun);
+
     const errorOptions = createErrorFormattingOptions();
 
     return runInContext(expression, context, errorOptions);
@@ -86,11 +95,12 @@ export async function executeAsyncJsExpression (expression, testRun, callsite, o
     if (!expression || !expression.length)
         return Promise.resolve();
 
-    const context      = getExecutionContext(testRun.controller);
-    const errorOptions = createErrorFormattingOptions(expression);
+    const context           = getExecutionContext(testRun.controller);
+    const errorOptions      = createErrorFormattingOptions(expression);
+    const wrappedExpression = wrapInAsync(expression, testRun.id);
 
     try {
-        return await runInContext(wrapInAsync(expression), context, errorOptions)();
+        return await runInContext(wrappedExpression, context, errorOptions)();
     }
     catch (err) {
         const { line, column } = getErrorLineColumn(err);

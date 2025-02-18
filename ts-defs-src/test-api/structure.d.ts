@@ -2,6 +2,8 @@
 // {{#allowReferences}}
 /// <reference path="client-script.d.ts" />
 /// <reference path="test-controller.d.ts" />
+/// <reference path="skip-js-errors-options.d.ts" />
+/// <reference path="test-info.d.ts" />
 // {{/allowReferences}}
 
 interface HTTPAuthCredentials {
@@ -64,16 +66,18 @@ interface FixtureFn {
      * Specifies the fixture hook that is executed before the start of the first test in the fixture.
      *
      * @param fn - An asynchronous hook function that contains initialization or clean-up code.
-     * @param fn `ctx` - A fixture context object used to share variables between fixture hooks and test code.
+     * @param fn `ctx` - An object that you can use to store variables. Accessible in both fixture hooks and test code.
+     * @param fn `info` - An object that contains information about the fixture: its name, metadata and path.
      */
-    before(fn: (ctx: {[key: string]: any}) => Promise<any>): this;
+    before(fn: (ctx: {[key: string]: any}, info: FixtureInfo) => Promise<any>): this;
     /**
      * Specifies the fixture hook that is executed after the end of the last test in the fixture.
      *
      * @param fn - An asynchronous hook function that contains initialization or clean-up code.
-     * @param fn `ctx` - A fixture context object used to share variables between fixture hooks and test code.
+     * @param fn `ctx` - An object that you can use to store variables. Accessible in both fixture hooks and test code.
+     * @param fn `info` - An object that contains information about the fixture: its name, metadata and path.
      */
-    after(fn: (ctx: {[key: string]: any}) => Promise<any>): this;
+    after(fn: (ctx: {[key: string]: any}, info: FixtureInfo) => Promise<any>): this;
     /**
      * Specifies the hook that is executed on the start of each test in the fixture.
      *
@@ -107,18 +111,22 @@ interface FixtureFn {
      */
     disablePageReloads: this;
     /**
+     * Disables the global concurrency setting for this fixture.
+     */
+    disableConcurrency: this;
+    /**
      * Specifies the additional information for all tests in the fixture. This information can be used in reports.
      *
      * @param key - The name of the metadata entry
      * @param value - The value of the metadata entry
      */
-    meta(key: string, value: string): this;
+    meta(key: string, value: unknown): this;
     /**
      * Specifies the additional information for all tests in the fixture. This information can be used in reports.
      *
      * @param data - Key-value pairs
      */
-    meta(data: object): this;
+    meta(data: Metadata): this;
     /**
      * Attaches hooks to all tests in the fixture
      *
@@ -131,6 +139,13 @@ interface FixtureFn {
      * @param scripts - Scripts that should be added to the tested pages.
      */
     clientScripts (scripts: ClientScript | ClientScript[]): this;
+
+    /**
+     * Customize the behavior of the skipJsErrors method.
+     *
+     * @param options - Error skipping conditions: a Boolean flag, an Object with options, or a callback function that defines custom error skipping logic.
+     */
+    skipJsErrors (options?: boolean | SkipJsErrorsOptionsObject | SkipJsErrorsCallback | SkipJsErrorsCallbackWithOptionsObject): this;
 }
 
 interface TestFn {
@@ -193,13 +208,13 @@ interface TestFn {
      * @param key - The name of the metadata entry
      * @param value - The value of the metadata entry
      */
-    meta(key: string, value: string): this;
+    meta(key: string, value: unknown): this;
     /**
      * Specifies the additional information for the test. This information can be used in reports.
      *
      * @param data - Key-value pairs
      */
-    meta(data: object): this;
+    meta(data: Metadata): this;
     /**
      * Attaches hooks to the test
      *
@@ -217,4 +232,11 @@ interface TestFn {
      *
      */
     timeouts(testTimeouts: TestTimeouts): this;
+
+    /**
+     * Customize the behavior of the skipJsErrors method.
+     *
+     * @param options - Error skipping conditions: a Boolean flag, an Object with options, or a callback function that defines custom error skipping logic.
+     */
+    skipJsErrors (options?: boolean | SkipJsErrorsOptionsObject | SkipJsErrorsCallback | SkipJsErrorsCallbackWithOptionsObject): this;
 }

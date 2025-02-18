@@ -8,8 +8,9 @@ const eventSimulator = hammerhead.eventSandbox.eventSimulator;
 const listeners      = hammerhead.eventSandbox.listeners;
 const nativeMethods  = hammerhead.nativeMethods;
 
-const domUtils   = testCafeCore.domUtils;
-const styleUtils = testCafeCore.styleUtils;
+const domUtils         = testCafeCore.domUtils;
+const styleUtils       = testCafeCore.styleUtils;
+const selectController = testCafeCore.selectController;
 
 const selectElementUI = testCafeUI.selectElement;
 
@@ -32,8 +33,8 @@ class LabelElementClickCommand extends ElementClickCommand {
     constructor (eventState, eventArgs) {
         super(eventState, eventArgs);
 
-        this.label = this.eventArgs.element;
-        this.input = getElementBoundToLabel(this.eventArgs.element);
+        this.targetElement = this.eventArgs.element;
+        this.input         = getElementBoundToLabel(this.eventArgs.element);
     }
 
     run () {
@@ -49,7 +50,7 @@ class LabelElementClickCommand extends ElementClickCommand {
 
         listeners.removeInternalEventBeforeListener(window, ['focus'], ensureFocusRaised);
 
-        if (domUtils.isElementFocusable(this.label) && !focusRaised)
+        if (domUtils.isElementFocusable(this.targetElement) && !focusRaised)
             this._ensureBoundElementFocusRaised();
     }
 
@@ -76,7 +77,7 @@ class SelectElementClickCommand extends ElementClickCommand {
         const isSelectWithDropDown = styleUtils.getSelectElementSize(element) === 1;
 
         if (isSelectWithDropDown && this.eventState.simulateDefaultBehavior !== false) {
-            if (selectElementUI.isOptionListExpanded(element))
+            if (selectController.isOptionListExpanded(element))
                 selectElementUI.collapseOptionList();
             else
                 selectElementUI.expandOptionList(element);
@@ -114,7 +115,11 @@ class LabelledCheckboxElementClickCommand extends LabelElementClickCommand {
 
         listeners.removeInternalEventBeforeListener(window, ['change'], onChange);
 
-        if (browserUtils.isChrome && !changed)
+        // NOTE: Two overlapping issues: https://github.com/DevExpress/testcafe/issues/3348 and https://github.com/DevExpress/testcafe/issues/6949
+        // When label contains <a href=any> or <button> element, clicking these elements should prevent checkbox from changing checked state.
+        // Also, checkbox state should not be changed if it is disabled.
+        // We should to leave the code for fixing .focus issue and add additional check for the clickable elements inside the label:
+        if (browserUtils.isChrome && !changed && !this.checkbox.disabled && !this._isClickableElementInsideLabel(this.targetElement))
             this._ensureCheckboxStateChanged();
     }
 
@@ -122,6 +127,13 @@ class LabelledCheckboxElementClickCommand extends LabelElementClickCommand {
         this.checkbox.checked = !this.checkbox.checked;
 
         eventSimulator.change(this.checkbox);
+    }
+
+    _isClickableElementInsideLabel (element) {
+        const isClickableLink = domUtils.isAnchorElement(element) && element.getAttribute('href');
+        const isButton        = domUtils.isButtonElement(element);
+
+        return isClickableLink || isButton;
     }
 }
 
@@ -146,5 +158,3 @@ export default function (eventState, eventArgs) {
 
     return new ElementClickCommand(eventState, eventArgs);
 }
-
-

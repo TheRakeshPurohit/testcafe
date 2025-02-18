@@ -6,6 +6,7 @@ const browserProviderPool = require('../../../../../lib/browser/provider/pool');
 const BrowserConnection   = require('../../../../../lib/browser/connection');
 const { createReporter }  = require('../../../utils/reporter');
 
+const setNativeAutomationForRemoteConnection = require('../../../utils/set-native-automation-for-remote-connection');
 
 let errors = null;
 
@@ -15,10 +16,22 @@ const reporter = createReporter({
     },
 });
 
-function createConnection (browser) {
+function createConnection (browser, devMode) {
     return browserProviderPool
         .getBrowserInfo(browser)
-        .then(browserInfo => new BrowserConnection(testCafe.browserConnectionGateway, browserInfo, false));
+        .then(browserInfo => {
+            const options = {
+                disableMultipleWindows: false,
+                nativeAutomation:       config.nativeAutomation,
+                developmentMode:        devMode,
+            };
+
+            const connnection = new BrowserConnection(testCafe.browserConnectionGateway, browserInfo, false, options);
+
+            connnection.initialize();
+
+            return connnection;
+        });
 }
 
 const initializeConnectionLowHeartbeatTimeout = connection => {
@@ -42,29 +55,33 @@ const initializeConnectionHangOnRestart = connection => {
     };
 };
 
-function run (pathToTest, filter, initializeConnection = initializeConnectionLowHeartbeatTimeout) {
+function run (pathToTest, filter, devMode = config.devMode, initializeConnection = initializeConnectionLowHeartbeatTimeout) {
     const src          = path.join(__dirname, pathToTest);
     const browserNames = config.currentEnvironment.browsers.map(browser => browser.browserName || browser.alias);
 
-    return Promise.all(browserNames.map(browser => createConnection(browser)))
+    return Promise.all(browserNames.map(browser => createConnection(browser, devMode)))
         .then(connections => {
             connections.forEach(connection => initializeConnection(connection));
 
             return connections;
         })
         .then(connection => {
-            return testCafe
-                .createRunner()
+            const runner = testCafe.createRunner();
+
+            if (config.nativeAutomation)
+                setNativeAutomationForRemoteConnection(runner);
+
+            return runner
                 .src(src)
                 .filter(testName => testName === filter)
                 .reporter(reporter)
                 .browsers(connection)
-                .run();
+                .run({ disableNativeAutomation: !config.nativeAutomation });
         });
 }
 
-describe('Browser reconnect', function () {
-    if (config.useLocalBrowsers && !config.proxyless) {
+if (config.useLocalBrowsers) {
+    describe('Browser reconnect', function () {
         it('Should restart browser when it does not respond', function () {
             return run('./testcafe-fixtures/index-test.js', 'Should restart browser when it does not respond')
                 .then(() => {
@@ -76,7 +93,13 @@ describe('Browser reconnect', function () {
             let errLog = '';
 
             return new Promise(resolve => {
-                const proc = spawn(`node ${path.join(__dirname, 'run-log-error-on-disconnect-test.js')}`, { shell: true, env: { ...process.env, DEBUG: 'hammerhead:*' } });
+                const proc = spawn(`node ${path.join(__dirname, 'run-log-error-on-disconnect-test.js')}`, {
+                    shell: true,
+                    env:   {
+                        ...process.env,
+                        DEBUG: 'testcafe:hammerhead:*',
+                    },
+                });
 
                 proc.stderr.on('data', data => {
                     errLog += data.toString('utf-8');
@@ -85,7 +108,34 @@ describe('Browser reconnect', function () {
                 proc.on('close', resolve);
             })
                 .then(() => {
-                    expect(errLog).contains('"chrome:headless" disconnected during test execution');
+                    expect(errLog).contains('disconnected during test execution');
+                });
+        });
+
+        it('Should raise reporter reportTaskDone event on browser disconnect', function () {
+
+            let reporterLog = '';
+
+            return new Promise(resolve => {
+                const proc = spawn(`node ${path.join(__dirname, 'run-log-error-on-disconnect-test.js')}`, {
+                    shell: true,
+                    env:   {
+                        ...process.env,
+                        CUSTOM_REPORTER: true,
+                    },
+                });
+
+                proc.stdout.on('data', data => {
+                    reporterLog += data.toString('utf-8');
+                });
+
+                proc.stderr.on('data', () => {
+                });
+
+                proc.on('close', resolve);
+            })
+                .then(() => {
+                    expect(reporterLog).eql('reportTaskDone');
                 });
         });
 
@@ -100,10 +150,18 @@ describe('Browser reconnect', function () {
         });
 
         it('Should restart browser on timeout if the `closeBrowser` method hangs', function () {
-            return run('./testcafe-fixtures/index-test.js', 'Should restart browser on timeout if the `closeBrowser` method hangs', initializeConnectionHangOnRestart)
+            return run('./testcafe-fixtures/index-test.js', 'Should restart browser on timeout if the `closeBrowser` method hangs', config.devMode, initializeConnectionHangOnRestart)
                 .then(() => {
                     expect(errors.length).eql(0);
                 });
         });
-    }
-});
+
+        it('Shouldn\'t restart browser when it does not respond and developmentMode on', function () {
+            return run('./testcafe-fixtures/index-test.js', 'Shouldn\'t restart browser when it does not respond and developmentMode on', true)
+                .then(() => {
+                    expect(errors.length).eql(0);
+                });
+        });
+    });
+}
+

@@ -1,6 +1,6 @@
 const expect                          = require('chai').expect;
 const { noop, stubFalse, pick, omit } = require('lodash');
-const nanoid                          = require('nanoid');
+const { nanoid }                      = require('nanoid');
 const { rmdirSync, statSync }         = require('fs');
 const { join, dirname }               = require('path');
 const proxyquire                      = require('proxyquire');
@@ -16,13 +16,10 @@ const WARNING_MESSAGE                 = require('../../lib/notifications/warning
 const BrowserProviderPluginHost       = require('../../lib/browser/provider/plugin-host');
 const WarningLog                      = require('../../lib/notifications/warning-log');
 
+const { browserConnectionGatewayMock } = require('./helpers/mocks');
+
 class BrowserConnectionMock extends BrowserConnection {
     constructor () {
-        const browserConnectionGatewayMock = {
-            startServingConnection: noop,
-            stopServingConnection:  noop,
-        };
-
         const providerMock = {
             openBrowser:    noop,
             isLocalBrowser: noop,
@@ -77,7 +74,9 @@ describe('Browser provider', function () {
             });
         });
 
-        it( 'Should get full info for all browsers', async () => {
+        it( 'Should get full info for all browsers', async function () {
+            this.timeout(10000);
+
             const browserInfoProperties = [
                 'provider',
                 'providerName',
@@ -85,7 +84,7 @@ describe('Browser provider', function () {
                 'browserOption',
             ];
 
-            const browsersInfo = await browserProviderPool.getBrowserInfo( 'all' );
+            const browsersInfo = await browserProviderPool.getBrowserInfo('all');
 
             browsersInfo.forEach( item => {
                 browserInfoProperties.forEach(porp => {

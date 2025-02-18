@@ -1,9 +1,9 @@
 // TODO: once we'll have client commons load it from there instead of node modules (currently it's leads to two copies of this packages on client)
-// TODO: Get rid of Pinkie after dropping IE11
 import COMMAND from '../../browser/connection/command';
 import HeartbeatStatus from '../../browser/connection/heartbeat-status';
 import { HEARTBEAT_INTERVAL } from '../../utils/browser-connection-timeouts';
 import SERVICE_ROUTES from '../../browser/connection/service-routes';
+import isFileProtocol from '../../shared/utils/is-file-protocol';
 
 /*eslint-disable no-restricted-properties*/
 const LOCATION_HREF   = document.location.href;
@@ -103,18 +103,49 @@ export function stopInitScriptExecution () {
     allowInitScriptExecution = false;
 }
 
-export function redirect (command) {
-    stopInitScriptExecution();
-    document.location = command.url;
+export function redirectUsingCdp (command, { openFileProtocolUrl, createXHR }) {
+    sendXHR(openFileProtocolUrl, createXHR, { method: 'POST', data: JSON.stringify({ url: command.url }) }); //eslint-disable-line no-restricted-globals
 }
 
-async function getStatus (statusUrl, createXHR, { manualRedirect } = {}) {
-    const result = await sendXHR(statusUrl, createXHR);
+export function redirect (command, opts) {
+    stopInitScriptExecution();
 
-    const redirecting = (result.cmd === COMMAND.run || result.cmd === COMMAND.idle) && !isCurrentLocation(result.url);
+    if (isFileProtocol(command.url))
+        redirectUsingCdp(command, opts);
+    else
+        setLocation(command, opts);
+}
+
+function setLocation (command, opts) {
+    const hashIndex       = command.url.indexOf('#');
+    const onlyHashChanged = hashIndex !== -1 && command.url.slice(0, hashIndex) === LOCATION_HREF.slice(0, hashIndex);
+
+    document.location = command.url;
+
+    if (opts.nativeAutomation && onlyHashChanged)
+        document.location.reload();
+}
+
+function nativeAutomationCheckRedirecting ({ result }) {
+    if (result.cmd === COMMAND.idle)
+        return regularCheckRedirecting(result);
+
+    // NOTE: The tested page URL can be the same for a few tests.
+    // So, we are forced to return true for all 'run' commands.
+    return true;
+}
+
+function regularCheckRedirecting (result) {
+    return (result.cmd === COMMAND.run || result.cmd === COMMAND.idle)
+        && !isCurrentLocation(result.url);
+}
+
+async function getStatus ({ statusUrl, openFileProtocolUrl }, createXHR, { manualRedirect, nativeAutomation } = {}) {
+    const result      = await sendXHR(statusUrl, createXHR);
+    const redirecting = nativeAutomation ? nativeAutomationCheckRedirecting({ result }) : regularCheckRedirecting(result);
 
     if (redirecting && !manualRedirect)
-        redirect(result);
+        redirect(result, { createXHR, openFileProtocolUrl, nativeAutomation });
 
     return { command: result, redirecting };
 }
@@ -170,5 +201,45 @@ export function setActiveWindowId (activeWindowIdUrl, createXHR, windowId) {
     return sendXHR(activeWindowIdUrl, createXHR, {
         method: 'POST',
         data:   JSON.stringify({ windowId }), //eslint-disable-line no-restricted-globals
+    });
+}
+
+export function ensureWindowInNativeAutomation (ensureWindowInNativeAutomationUrl, createXHR, windowId) {
+    return sendXHR(ensureWindowInNativeAutomationUrl, createXHR, {
+        method: 'POST',
+        data:   JSON.stringify({ windowId }), //eslint-disable-line no-restricted-globals
+    });
+}
+
+export function closeWindow (closeWindowUrl, createXHR, windowId) {
+    return sendXHR(closeWindowUrl, createXHR, {
+        method: 'POST',
+        data:   JSON.stringify({ windowId }), //eslint-disable-line no-restricted-globals
+    });
+}
+
+export async function dispatchNativeAutomationEvent (dispatchNativeAutomationEventUrl, createXHR, type, options) {
+    const data = JSON.stringify({ //eslint-disable-line no-restricted-globals
+        type,
+        options,
+    });
+
+    await sendXHR(dispatchNativeAutomationEventUrl, createXHR, {
+        method: 'POST',
+        data,
+    });
+}
+
+export async function dispatchNativeAutomationEventSequence (dispatchNativeAutomationEventSequenceUrl, createXHR, sequence) {
+    await sendXHR(dispatchNativeAutomationEventSequenceUrl, createXHR, {
+        method: 'POST',
+        data:   JSON.stringify(sequence), //eslint-disable-line no-restricted-globals
+    });
+}
+
+export function parseSelector (parseSelectorUrl, createXHR, selector) {
+    return sendXHR(parseSelectorUrl, createXHR, {
+        method: 'POST',
+        data:   JSON.stringify({ selector }), //eslint-disable-line no-restricted-globals
     });
 }

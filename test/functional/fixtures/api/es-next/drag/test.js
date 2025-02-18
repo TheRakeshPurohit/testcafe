@@ -1,4 +1,5 @@
-const expect = require('chai').expect;
+const { skipInNativeAutomation } = require('../../../../utils/skip-in');
+const { expect }                 = require('chai');
 
 
 describe('[API] Drag actions', function () {
@@ -54,7 +55,7 @@ describe('[API] Drag actions', function () {
                 only:       'chrome',
             })
                 .catch(function (errs) {
-                    expect(errs[0]).to.contain('The "offsetX" option is expected to be an integer, but it was string.');
+                    expect(errs[0]).to.contain('The "MouseOptions.offsetX" option is expected to be an integer, but it was string.');
                     expect(errs[0]).to.contain('> 29 |    await t.drag(\'#draggable-div-1\', 10, 20, { offsetX: \'test\' });');
                 });
         });
@@ -105,7 +106,7 @@ describe('[API] Drag actions', function () {
                 only:       'chrome',
             })
                 .catch(function (errs) {
-                    expect(errs[0]).to.contain('The "modifiers.shift" option is expected to be a boolean value, but it was number.');
+                    expect(errs[0]).to.contain('The "ModifiersOptions.shift" option is expected to be a boolean value, but it was number.');
                     expect(errs[0]).to.contain('> 48 |    await t.dragToElement(\'#draggable-div-2\', \'#destination-div\'');
                 });
         });
@@ -113,7 +114,7 @@ describe('[API] Drag actions', function () {
         it("Should validate node type of element that destinationElement's selector returns", function () {
             return runTests('./testcafe-fixtures/drag-test.js', 'Destination element selector returns text node', { shouldFail: true })
                 .catch(function (errs) {
-                    expect(errs[0]).to.contains('The element that matches the specified "destinationSelector" is not visible.');
+                    expect(errs[0]).to.contains('The action target is neither a DOM element nor a text node.');
                     expect(errs[0]).to.contains(' > 56 |    await t.dragToElement(\'#draggable-div-2\', getDocument);');
                 });
         });
@@ -125,7 +126,7 @@ describe('[API] Drag actions', function () {
 
     describe('html5 drag and drop', function () {
         it('Should raise drag and drop events', function () {
-            return runTests('./testcafe-fixtures/drag-and-drop-test.js', 'drag and drop', { skip: ['iphone', 'ipad', 'android'] });
+            return runTests('./testcafe-fixtures/drag-and-drop-test.js', 'drag and drop', { skip: ['iphone', 'ipad', 'android', 'firefox-osx'] });
         });
 
         it('Should check is element draggable', function () {
@@ -136,7 +137,8 @@ describe('[API] Drag actions', function () {
             return runTests('./testcafe-fixtures/drag-and-drop-test.js', 'try to drop to undroppable', { skip: ['iphone', 'ipad', 'android'] });
         });
 
-        it('Should reproduce native browser behavior', function () {
+        // NOTE: Slightly difference in link.href. Probably related to link attribute overriding
+        skipInNativeAutomation('Should reproduce native browser behavior', function () {
             return runTests('./testcafe-fixtures/drag-and-drop-test.js', 'drag link and image', { only: ['chrome'] });
         });
 

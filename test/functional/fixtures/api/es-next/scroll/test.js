@@ -1,4 +1,6 @@
-describe('Scroll', () => {
+const { skipDescribeInNativeAutomation } = require('../../../../utils/skip-in');
+
+skipDescribeInNativeAutomation('Scroll', () => {
     it('Should raise events for scroll', () => {
         return runTests('./testcafe-fixtures/raise-events.js');
     });

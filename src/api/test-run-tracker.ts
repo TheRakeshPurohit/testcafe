@@ -1,19 +1,18 @@
 import getStackFrames from 'callsite';
 import { EventEmitter } from 'events';
 import TestRun from '../test-run';
-import TestRunProxy from '../services/compiler/test-run-proxy';
 
 const TRACKING_MARK_RE = /^\$\$testcafe_test_run\$\$(\S+)\$\$$/;
 const STACK_CAPACITY   = 5000;
 
 class TestRunTracker extends EventEmitter {
     private enabled: boolean;
-    public activeTestRuns: { [id: string]: TestRun | TestRunProxy };
+    public activeTestRuns: { [id: string]: TestRun };
 
     public constructor () {
         super();
 
-        this.enabled = false;
+        this.enabled        = false;
         this.activeTestRuns = {};
     }
 
@@ -48,6 +47,10 @@ class TestRunTracker extends EventEmitter {
         return frames;
     }
 
+    public getMarkedFnName (testRunId: string): string {
+        return `$$testcafe_test_run$$${testRunId}$$`;
+    }
+
     public ensureEnabled (): void {
         if (!this.enabled) {
             global.setTimeout   = this._createContextSwitchingFunctionHook(global.setTimeout, 1);
@@ -62,21 +65,22 @@ class TestRunTracker extends EventEmitter {
         }
     }
 
-    public addTrackingMarkerToFunction (testRunId: string, fn: Function): Function {
+    public addTrackingMarkerToFunction (testRunId: string, fn: Function, context?: any): Function {
         const markerFactoryBody = `
-            return function $$testcafe_test_run$$${testRunId}$$ () {
+            return function ${ this.getMarkedFnName(testRunId) } () {
+                context = context || this;
                 switch (arguments.length) {
-                    case 0: return fn.call(this);
-                    case 1: return fn.call(this, arguments[0]);
-                    case 2: return fn.call(this, arguments[0], arguments[1]);
-                    case 3: return fn.call(this, arguments[0], arguments[1], arguments[2]);
-                    case 4: return fn.call(this, arguments[0], arguments[1], arguments[2], arguments[3]);
-                    default: return fn.apply(this, arguments);
+                    case 0: return fn.call(context);
+                    case 1: return fn.call(context, arguments[0]);
+                    case 2: return fn.call(context, arguments[0], arguments[1]);
+                    case 3: return fn.call(context, arguments[0], arguments[1], arguments[2]);
+                    case 4: return fn.call(context, arguments[0], arguments[1], arguments[2], arguments[3]);
+                    default: return fn.apply(context, arguments);
                 }
             };
         `;
 
-        return new Function('fn', markerFactoryBody)(fn);
+        return new Function('fn', 'context', markerFactoryBody)(fn, context);
     }
 
     public getContextTestRunId (): string | null {
@@ -98,7 +102,7 @@ class TestRunTracker extends EventEmitter {
         return null;
     }
 
-    public resolveContextTestRun (): TestRun | TestRunProxy | null {
+    public resolveContextTestRun (): TestRun | null {
         const testRunId = this.getContextTestRunId();
 
         if (testRunId)
@@ -107,7 +111,7 @@ class TestRunTracker extends EventEmitter {
         return null;
     }
 
-    public addActiveTestRun (testRun: TestRun | TestRunProxy): void {
+    public addActiveTestRun (testRun: TestRun): void {
         this.activeTestRuns[testRun.id] = testRun;
 
         testRun.onAny((eventName: string, eventData: unknown) => this.emit(eventName, { testRun, data: eventData }));

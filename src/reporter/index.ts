@@ -2,13 +2,14 @@ import {
     find,
     sortBy,
     union,
+    isFunction,
 } from 'lodash';
 
 import { writable as isWritableStream } from 'is-stream';
 import ReporterPluginHost from './plugin-host';
 import ReporterPluginMethod from './plugin-methods';
 import formatCommand from './command/format-command';
-import { ReporterPluginError } from '../errors/runtime';
+import { ReporterPluginError, LoadReporterError } from '../errors/runtime';
 import Task from '../runner/task';
 import { Writable as WritableStream, Writable } from 'stream';
 import { WriteStream } from 'tty';
@@ -17,16 +18,23 @@ import Test from '../api/structure/test';
 import Fixture from '../api/structure/fixture';
 import TestRunErrorFormattableAdapter from '../errors/test-run/formattable-adapter';
 import { CommandBase } from '../test-run/commands/base';
+
 import {
-    ReporterPlugin, ReporterPluginSource, ReporterSource,
+    ReporterPlugin,
+    ReporterPluginSource,
+    ReporterSource,
 } from './interfaces';
+
 import { getPluginFactory, processReporterName } from '../utils/reporter';
 import resolvePathRelativelyCwd from '../utils/resolve-path-relatively-cwd';
 import makeDir from 'make-dir';
 import path from 'path';
 import fs from 'fs';
 import MessageBus from '../utils/message-bus';
-
+import BrowserConnection from '../browser/connection';
+import { Dictionary } from '../configuration/interfaces';
+import { reporterLogger } from '../utils/debug-loggers';
+import getTestCafeVersion from '../utils/get-testcafe-version';
 
 interface PendingPromise {
     resolve: Function | null;
@@ -45,6 +53,7 @@ interface TaskInfo {
 }
 
 interface TestInfo {
+    reportData: Dictionary<any[]>;
     fixture: Fixture;
     test: Test;
     testRunIds: string[];
@@ -56,17 +65,31 @@ interface TestInfo {
     warnings: string[];
     unstable: boolean;
     startTime: null | number;
+    finishTime: null | number;
     testRunInfo: null | TestRunInfo;
     pendingRuns: number;
     pendingStarts: number;
     pendingTestRunDonePromise: PendingPromise;
     pendingTestRunStartPromise: PendingPromise;
-    browsers: unknown[];
+    browsers: BrowserRunInfo[];
+}
+
+interface FixtureInfo {
+    id: string;
+    name: string | null;
+    path: string;
+    meta: Metadata;
+}
+
+interface BrowserRunInfo extends Browser {
+    testRunId: string;
+    quarantineAttemptsTestRunIds?: string[];
 }
 
 interface TestRunInfo {
     errs: TestRunErrorFormattableAdapter[];
     warnings: string[];
+    reportData: Dictionary<any[]>;
     durationMs: number;
     unstable: boolean;
     screenshotPath: string;
@@ -76,6 +99,7 @@ interface TestRunInfo {
     skipped: boolean;
     browsers: unknown[];
     testId: string;
+    fixture: FixtureInfo;
 }
 
 interface PluginMethodArguments {
@@ -100,6 +124,34 @@ interface ReportTaskActionEventArguments {
 interface ReportWarningEventArguments {
     message: string;
     testRun?: TestRun;
+    actionId?: string;
+}
+
+interface ReportDataEventArgs {
+    data: any[];
+    testRun: TestRun
+}
+
+export interface WriteInfo {
+    initiator: string;
+    formattedText: string;
+    formatOptions: {
+        useWordWrap: boolean;
+        indent: number;
+    }
+    data: undefined | object;
+}
+
+export interface ReporterPluginHooks {
+    onBeforeWrite?: Function;
+}
+
+export interface ReporterOptions {
+    name: string;
+    plugin: ReporterPlugin;
+    messageBus: MessageBus;
+    outStream: Writable;
+    reporterPluginHooks?: ReporterPluginHooks
 }
 
 export default class Reporter {
@@ -109,13 +161,12 @@ export default class Reporter {
     public taskInfo: TaskInfo | null;
     public readonly outStream: Writable;
 
-    public constructor (plugin: ReporterPlugin, messageBus: MessageBus, outStream: Writable, name: string) {
-        this.plugin     = new ReporterPluginHost(plugin, outStream, name);
+    public constructor ({ name, plugin, outStream, messageBus, reporterPluginHooks }: ReporterOptions) {
+        this.plugin     = new ReporterPluginHost(plugin, outStream, name, reporterPluginHooks);
         this.messageBus = messageBus;
-
-        this.disposed  = false;
-        this.taskInfo  = null;
-        this.outStream = outStream;
+        this.disposed   = false;
+        this.taskInfo   = null;
+        this.outStream  = outStream;
 
         this._assignMessageBusEventHandlers();
     }
@@ -136,7 +187,19 @@ export default class Reporter {
         return promise;
     }
 
+    public async init (): Promise<void> {
+        const testcafeVersion = getTestCafeVersion();
+
+        await this.dispatchToPlugin({
+            method:        ReporterPluginMethod.init,
+            initialObject: null,
+            args:          [testcafeVersion],
+        });
+    }
+
     public async dispatchToPlugin ({ method, initialObject, args = [] }: PluginMethodArguments): Promise<void> {
+        reporterLogger('begin dispatchToPlugin method: %s\n%O', method, args);
+
         try {
             // @ts-ignore
             await this.plugin[method](...args);
@@ -148,17 +211,24 @@ export default class Reporter {
                 originalError,
             });
 
+            reporterLogger('Plugin error: %O', uncaughtError);
+            reporterLogger('Plugin error: initialObject: %O', initialObject);
+
             if (initialObject)
                 await initialObject.emit('error', uncaughtError);
             else
                 throw uncaughtError;
         }
+
+        reporterLogger('end dispatchToPlugin method: %s', method);
     }
 
     private _assignMessageBusEventHandlers (): void {
         const messageBus = this.messageBus;
 
         messageBus.on('warning-add', async e => await this._onWarningAddHandler(e));
+
+        messageBus.on('report-data', async e => await this._onReportDataHandler(e));
 
         messageBus.once('start', async (task: Task) => await this._onceTaskStartHandler(task));
 
@@ -171,6 +241,8 @@ export default class Reporter {
         messageBus.on('test-action-done', async e => await this._onTaskTestActionDone(e));
 
         messageBus.once('done', async () => await this._onceTaskDoneHandler());
+
+        messageBus.once('unhandled-rejection', async () => await this._onceTaskDoneHandler());
     }
 
     public async dispose (): Promise<unknown> {
@@ -179,7 +251,9 @@ export default class Reporter {
 
         this.disposed = true;
 
-        if (!this.outStream || Reporter._isSpecialStream(this.outStream) || !isWritableStream(this.outStream))
+        if (!isFunction(this?.outStream?.once)
+            || Reporter._isSpecialStream(this.outStream)
+            || !isWritableStream(this.outStream))
             return Promise.resolve();
 
         const streamFinishedPromise = new Promise(resolve => {
@@ -214,20 +288,25 @@ export default class Reporter {
         if (!reporters.length)
             Reporter._addDefaultReporter(reporters);
 
-        return Promise.all(reporters.map(async ({ name, output }) => {
+        return Promise.all(reporters.map(async ({ name, output, options }) => {
             const pluginFactory = getPluginFactory(name);
             const processedName = processReporterName(name);
             const outStream     = output ? await Reporter._ensureOutStream(output) : void 0;
 
-            return {
-                plugin: pluginFactory(),
-                name:   processedName,
-                outStream,
-            };
+            try {
+                return {
+                    plugin: pluginFactory(options),
+                    name:   processedName,
+                    outStream,
+                };
+            }
+            catch (err) {
+                throw new LoadReporterError(err, processedName);
+            }
         }));
     }
 
-    private async _onWarningAddHandler ({ message, testRun }: ReportWarningEventArguments): Promise<void> {
+    private async _onWarningAddHandler ({ message, testRun, actionId }: ReportWarningEventArguments): Promise<void> {
         await this.dispatchToPlugin({
             method:        ReporterPluginMethod.reportWarnings as string,
             initialObject: this.messageBus,
@@ -235,6 +314,7 @@ export default class Reporter {
                 {
                     message,
                     testRunId: testRun?.id,
+                    actionId,
                 },
             ],
         });
@@ -254,12 +334,14 @@ export default class Reporter {
             warnings:                   [],
             unstable:                   false,
             startTime:                  null,
+            finishTime:                 null,
             testRunInfo:                null,
             pendingRuns:                runsPerTest,
             pendingStarts:              runsPerTest,
             pendingTestRunDonePromise:  Reporter._createPendingPromise(),
             pendingTestRunStartPromise: Reporter._createPendingPromise(),
             browsers:                   [],
+            reportData:                 {},
         };
     }
 
@@ -269,11 +351,21 @@ export default class Reporter {
         return task.tests.map(test => Reporter._createTestItem(test, runsPerTest));
     }
 
+    private static _getTestDuration (reportItem: TestInfo): number {
+        if (reportItem.test.skip)
+            return 0;
+
+        const finishTime = reportItem.finishTime || +new Date();
+
+        return finishTime - (reportItem.startTime as number);
+    }
+
     private static _createTestRunInfo (reportItem: TestInfo): TestRunInfo {
         return {
-            errs:           sortBy(reportItem.errs, ['userAgent', 'code']),
+            errs:           sortBy(reportItem.errs, [ 'userAgent', 'code' ]),
             warnings:       reportItem.warnings,
-            durationMs:     +new Date() - (reportItem.startTime as number), //eslint-disable-line  @typescript-eslint/no-extra-parens
+            reportData:     reportItem.reportData,
+            durationMs:     Reporter._getTestDuration(reportItem),
             unstable:       reportItem.unstable,
             screenshotPath: reportItem.screenshotPath as string,
             screenshots:    reportItem.screenshots,
@@ -282,6 +374,12 @@ export default class Reporter {
             skipped:        reportItem.test.skip,
             browsers:       reportItem.browsers,
             testId:         reportItem.test.id,
+            fixture:        {
+                id:   reportItem.fixture.id,
+                name: reportItem.fixture.name,
+                path: reportItem.fixture.path,
+                meta: reportItem.fixture.meta,
+            },
         };
     }
 
@@ -317,10 +415,7 @@ export default class Reporter {
                 ],
             });
 
-            if (!nextReportItem)
-                continue;
-
-            if (nextReportItem.fixture === currentFixture)
+            if (!nextReportItem || nextReportItem.fixture === currentFixture)
                 continue;
 
             await this.dispatchToPlugin({
@@ -348,15 +443,20 @@ export default class Reporter {
             testItem.videos = taskInfo.task.videos.getTestVideos(testItem.test.id);
 
         if (testRun.quarantine) {
-            testItem.quarantine = testRun.quarantine.attempts.reduce((result: Record<string, object>, errors: TestRunErrorFormattableAdapter[], index: number) => {
+            const testItemQuarantine = testRun.quarantine.attempts.reduce((result: Record<string, object>, { errors }, index: number) => {
                 const passed            = !errors.length;
                 const quarantineAttempt = index + 1;
 
                 result[quarantineAttempt] = { passed };
 
                 return result;
-            }, {});
+            }, { });
+
+            Object.assign(testItem.quarantine as object, testItemQuarantine);
         }
+
+        if (!testItem.finishTime)
+            testItem.finishTime = testRun.finishTime?.getTime() || null;
 
         if (!testItem.testRunInfo) {
             testItem.testRunInfo = Reporter._createTestRunInfo(testItem);
@@ -401,6 +501,7 @@ export default class Reporter {
         });
     }
 
+
     private async _onceTaskStartHandler (task: Task): Promise<void> {
         this.taskInfo = {
             task:                   task,
@@ -413,9 +514,11 @@ export default class Reporter {
             pendingTaskDonePromise: Reporter._createPendingPromise(),
         };
 
-        const startTime  = new Date();
-        const userAgents = task.browserConnectionGroups.map(group => group[0].userAgent);
-        const first      = this.taskInfo.testQueue[0];
+        const startTime              = task.startTime;
+        const browserConnectionsInfo = ([] as BrowserConnection[])
+            .concat(...task.browserConnectionGroups)
+            .map(connection => connection.userAgent);
+        const first                  = this.taskInfo.testQueue[0];
 
         const taskProperties = {
             configuration: task.opts,
@@ -426,7 +529,7 @@ export default class Reporter {
             initialObject: task,
             args:          [
                 startTime,
-                userAgents,
+                browserConnectionsInfo,
                 this.taskInfo.testCount,
                 task.testStructure,
                 taskProperties,
@@ -462,7 +565,12 @@ export default class Reporter {
         if (!testItem.pendingStarts) {
             // @ts-ignore
             if (this.plugin.reportTestStart) {
-                const testStartInfo = { testRunIds: testItem.testRunIds, testId: testItem.test.id };
+                const testStartInfo = {
+                    testRunIds: testItem.testRunIds,
+                    testId:     testItem.test.id,
+                    startTime:  new Date(testItem.startTime),
+                    skipped:    testItem.test.skip,
+                };
 
                 await this.dispatchToPlugin({
                     method:        ReporterPluginMethod.reportTestStart as string,
@@ -487,13 +595,33 @@ export default class Reporter {
 
         const reportItem                    = this._getTestItemForTestRun(this.taskInfo, testRun) as TestInfo;
         const isTestRunStoppedTaskExecution = !!testRun.errs.length && this.taskInfo.stopOnFirstFail;
+        const browser: BrowserRunInfo       = Object.assign({ testRunId: testRun.id }, testRun.browser);
 
-        reportItem.pendingRuns = isTestRunStoppedTaskExecution ? 0 : reportItem.pendingRuns - 1;
-        reportItem.unstable    = reportItem.unstable || testRun.unstable;
-        reportItem.errs        = reportItem.errs.concat(testRun.errs);
-        reportItem.warnings    = testRun.warningLog ? union(reportItem.warnings, testRun.warningLog.messages) : [];
+        reportItem.browsers.push(browser);
 
-        reportItem.browsers.push(Object.assign({ testRunId: testRun.id }, testRun.browser));
+        reportItem.pendingRuns            = isTestRunStoppedTaskExecution ? 0 : reportItem.pendingRuns - 1;
+        reportItem.unstable               = reportItem.unstable || testRun.unstable;
+        reportItem.errs                   = reportItem.errs.concat(testRun.errs);
+        reportItem.warnings               = testRun.warningLog ? union(reportItem.warnings, testRun.warningLog.messages) : [];
+        reportItem.reportData             = reportItem.reportData || {};
+        reportItem.reportData[testRun.id] = testRun.reportDataLog ? testRun.reportDataLog.data : [];
+
+        if (testRun.quarantine) {
+            reportItem.quarantine = reportItem.quarantine || {};
+
+            const reportItemQuarantine = testRun.quarantine.attempts.reduce((result: Record<string, object>, { errors, testRunId }) => {
+                const passed = !errors.length;
+
+                result[testRunId]                    = { passed, errors };
+                browser.quarantineAttemptsTestRunIds = browser.quarantineAttemptsTestRunIds || [];
+
+                browser.quarantineAttemptsTestRunIds.push(testRunId);
+
+                return result;
+            }, {});
+
+            Object.assign(reportItem.quarantine, reportItemQuarantine);
+        }
 
         if (!reportItem.pendingRuns)
             await this._resolveTestItem(this.taskInfo, reportItem, testRun);
@@ -563,5 +691,46 @@ export default class Reporter {
         });
 
         (this.taskInfo.pendingTaskDonePromise.resolve as Function)();
+    }
+
+    private _prepareReportDataEventArgs (testRun: TestRun): any {
+        const { test, browser, id } = testRun;
+        const fixture               = test.fixture;
+
+        const testInfo = {
+            name: test.name,
+            id:   test.id,
+            meta: test.meta,
+        };
+
+        const fixtureInfo = {
+            name: fixture?.name,
+            id:   fixture?.id,
+            meta: fixture?.meta,
+            path: fixture?.path,
+        };
+
+        return {
+            test:      testInfo,
+            fixture:   fixtureInfo,
+            testRunId: id,
+            browser,
+        };
+    }
+
+    private async _onReportDataHandler ({ testRun, data }: ReportDataEventArgs): Promise<void> {
+        if (!this.taskInfo)
+            return;
+
+        const testRunInfo = this._prepareReportDataEventArgs(testRun);
+
+        await this.dispatchToPlugin({
+            method:        ReporterPluginMethod.reportData as string,
+            initialObject: this.taskInfo.task,
+            args:          [
+                testRunInfo,
+                ...data,
+            ],
+        });
     }
 }

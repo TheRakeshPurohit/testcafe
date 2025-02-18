@@ -4,7 +4,6 @@ import WarningLog from '../notifications/warning-log';
 import { Writable as WritableStream } from 'stream';
 import BrowserConnection from '../browser/connection';
 import BrowserConnectionGateway from '../browser/connection/gateway';
-import CompilerService from '../services/compiler/host';
 import Test from '../api/structure/test';
 import { Proxy } from 'testcafe-hammerhead';
 import { Dictionary } from '../configuration/interfaces';
@@ -12,6 +11,8 @@ import FixtureHookController from './fixture-hook-controller';
 import Screenshots from '../screenshots';
 import Capturer from '../screenshots/capturer';
 import MessageBus from '../utils/message-bus';
+import TestRunHookController from './test-run-hook-controller';
+import TestCafeConfiguration from '../configuration/testcafe-configuration';
 
 export interface ActionEventArg {
     apiActionName: string;
@@ -50,8 +51,8 @@ export type BrowserInit = string | object | BrowserConnection;
 
 export interface BootstrapperInit {
     browserConnectionGateway: BrowserConnectionGateway;
-    compilerService?: CompilerService;
     messageBus: MessageBus;
+    configuration: TestCafeConfiguration;
 }
 
 export interface BrowserJobInit {
@@ -62,7 +63,6 @@ export interface BrowserJobInit {
     warningLog: WarningLog;
     fixtureHookController: FixtureHookController;
     opts: Dictionary<OptionValue>;
-    compilerService?: CompilerService;
     messageBus: MessageBus;
 }
 
@@ -72,7 +72,6 @@ export interface TaskInit {
     proxy: Proxy;
     opts: Dictionary<OptionValue>;
     runnerWarningLog: WarningLog;
-    compilerService?: CompilerService;
     messageBus: MessageBus;
 }
 
@@ -84,7 +83,7 @@ export interface TestRunControllerInit {
     warningLog: WarningLog;
     fixtureHookController: FixtureHookController;
     opts: Dictionary<OptionValue>;
-    compilerService?: CompilerService;
+    testRunHook: TestRunHookController;
     messageBus: MessageBus;
 }
 
@@ -94,5 +93,4 @@ export interface TestRunInit {
     screenshotCapturer: Capturer;
     globalWarningLog: WarningLog;
     opts: Dictionary<OptionValue>;
-    compilerService?: CompilerService;
 }

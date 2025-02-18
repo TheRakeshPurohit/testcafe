@@ -1,6 +1,7 @@
-import { isAbsolute, extname } from 'path';
+import { extname, isAbsolute } from 'path';
 import debug from 'debug';
 import JSON5 from 'json5';
+
 import {
     castArray,
     cloneDeep,
@@ -8,7 +9,7 @@ import {
     mergeWith,
 } from 'lodash';
 
-import { stat, readFile } from '../utils/promisified-functions';
+import { readFile, stat } from '../utils/promisified-functions';
 import Option from './option';
 import OptionSource from './option-source';
 import resolvePathRelativelyCwd from '../utils/resolve-path-relatively-cwd';
@@ -16,7 +17,9 @@ import renderTemplate from '../utils/render-template';
 import WARNING_MESSAGES from '../notifications/warning-message';
 import log from '../cli/log';
 import { Dictionary } from './interfaces';
-import { JS_CONFIGURATION_EXTENSION } from './formats';
+import Extensions from './formats';
+import { ReadConfigFileError } from '../errors/runtime';
+import { RUNTIME_ERRORS } from '../errors/types';
 
 const DEBUG_LOGGER = debug('testcafe:configuration');
 
@@ -37,9 +40,7 @@ export default class Configuration {
         const result = Object.create(null);
 
         Object.entries(obj).forEach(([key, value]) => {
-            const option = new Option(key, value);
-
-            result[key] = option;
+            result[key] = new Option(key, value);
         });
 
         return result;
@@ -49,13 +50,13 @@ export default class Configuration {
         log.write(message);
     }
 
-    private static _showWarningForError (error: Error, warningTemplate: string, ...args: TemplateArguments): void {
-        const message = renderTemplate(warningTemplate, ...args);
+    private static _throwReadConfigError (code: string, error: Error, path: string, renderCallsite: boolean): void {
+        const readConfigError = new ReadConfigFileError(code, error, path, renderCallsite);
 
-        Configuration._showConsoleWarning(message);
-
-        DEBUG_LOGGER(message);
+        DEBUG_LOGGER(readConfigError.message);
         DEBUG_LOGGER(error);
+
+        throw readConfigError;
     }
 
     private static _resolveFilePath (path: string | null): string | null {
@@ -102,7 +103,7 @@ export default class Configuration {
         });
     }
 
-    public getOption (key: string): OptionValue {
+    protected _getOption (key: string): OptionValue {
         if (!key)
             return void 0;
 
@@ -112,6 +113,10 @@ export default class Configuration {
             return void 0;
 
         return option.value;
+    }
+
+    public getOption<Type> (key: string): Type {
+        return this._getOption(key) as Type;
     }
 
     public getOptions (predicate?: (name: string, option: Option) => boolean): Dictionary<OptionValue> {
@@ -128,8 +133,17 @@ export default class Configuration {
         return result;
     }
 
-    public clone (): Configuration {
-        return cloneDeep(this);
+    public clone (nonClonedOptions?: string | string[]): Configuration {
+        const configuration = cloneDeep(this);
+
+        if (nonClonedOptions) {
+            castArray(nonClonedOptions).forEach(key => {
+                if (configuration._options[key])
+                    configuration._options[key].value = this._options[key].value;
+            });
+        }
+
+        return configuration;
     }
 
     public get filePath (): string | undefined {
@@ -169,11 +183,8 @@ export default class Configuration {
 
         this._filePath = existedConfigs[0].filePath;
 
-        if (existedConfigs.length > 1) {
-            const configPriorityListStr = this._getConfigPriorityListString();
-
-            Configuration._showConsoleWarning(renderTemplate(WARNING_MESSAGES.multipleConfigurationFilesFound, this._filePath, configPriorityListStr));
-        }
+        if (existedConfigs.length > 1)
+            Configuration._showConsoleWarning(renderTemplate(WARNING_MESSAGES.multipleConfigurationFilesFound, this._filePath));
 
         return existedConfigs[0].options;
     }
@@ -184,15 +195,23 @@ export default class Configuration {
 
             return true;
         }
-        catch (error) {
+        catch (error: any) {
             DEBUG_LOGGER(renderTemplate(WARNING_MESSAGES.cannotFindConfigurationFile, filePath, error.stack));
 
             return false;
         }
     }
 
+    private static _hasExtension (filePath: string | undefined, extention: string): boolean {
+        return !!filePath && extname(filePath) === extention;
+    }
+
     protected _isJSConfiguration (filePath = this.filePath): boolean {
-        return !!filePath && extname(filePath) === JS_CONFIGURATION_EXTENSION;
+        return Configuration._hasExtension(filePath, Extensions.js) || Configuration._hasExtension(filePath, Extensions.cjs);
+    }
+
+    protected _isJSONConfiguration (filePath = this.filePath): boolean {
+        return Configuration._hasExtension(filePath, Extensions.json);
     }
 
     public _readJsConfigurationFileContent (filePath = this.filePath): object | null {
@@ -202,8 +221,8 @@ export default class Configuration {
 
                 return require(filePath);
             }
-            catch (error) {
-                Configuration._showWarningForError(error, WARNING_MESSAGES.cannotReadConfigFile, filePath);
+            catch (error: any) {
+                Configuration._throwReadConfigError(RUNTIME_ERRORS.cannotReadConfigFile, error, filePath, true);
             }
         }
 
@@ -214,8 +233,8 @@ export default class Configuration {
         try {
             return await readFile(filePath);
         }
-        catch (error) {
-            Configuration._showWarningForError(error, WARNING_MESSAGES.cannotReadConfigFile, filePath);
+        catch (error: any) {
+            Configuration._throwReadConfigError(RUNTIME_ERRORS.cannotReadConfigFile, error, filePath || '', false);
         }
 
         return null;
@@ -225,8 +244,8 @@ export default class Configuration {
         try {
             return JSON5.parse(configurationFileContent.toString());
         }
-        catch (error) {
-            Configuration._showWarningForError(error, WARNING_MESSAGES.cannotParseConfigFile, filePath);
+        catch (error: any) {
+            Configuration._throwReadConfigError(RUNTIME_ERRORS.cannotParseConfigFile, error, filePath || '', false);
         }
 
         return null;
@@ -268,6 +287,9 @@ export default class Configuration {
     }
 
     protected _addOverriddenOptionIfNecessary (value1: OptionValue, value2: OptionValue, source: OptionSource, optionName: string): void {
+        if (source === OptionSource.Default)
+            return;
+
         if (value1 === void 0 || value2 === void 0 || value1 === value2 || source !== OptionSource.Configuration)
             return;
 
@@ -284,9 +306,5 @@ export default class Configuration {
         }
 
         option.source = OptionSource.Input;
-    }
-
-    protected _getConfigPriorityListString (filesPaths = this.defaultPaths): string {
-        return filesPaths?.map((path, index) => `${index + 1}. ${path}`).join('\n') || '';
     }
 }

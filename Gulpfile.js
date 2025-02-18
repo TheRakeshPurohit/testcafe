@@ -17,7 +17,6 @@ const globby                        = require('globby');
 const minimist                      = require('minimist');
 const functionalTestConfig          = require('./test/functional/config');
 const childProcess                  = require('child_process');
-const npmAuditor                    = require('npm-auditor');
 const checkLicenses                 = require('./test/dependency-licenses-checker');
 const packageInfo                   = require('./package');
 const ensureDockerEnvironment       = require('./gulp/docker/ensure-docker-environment');
@@ -27,24 +26,15 @@ const { exitDomains, enterDomains } = require('./gulp/helpers/domain');
 const getTimeout                    = require('./gulp/helpers/get-timeout');
 const promisifyStream               = require('./gulp/helpers/promisify-stream');
 const testFunctional                = require('./gulp/helpers/test-functional');
-const testClient                    = require('./gulp/helpers/test-client');
 const moduleExportsTransform        = require('./gulp/helpers/module-exports-transform');
+const createPackageFilesForTests    = require('./gulp/helpers/create-package-files-for-tests');
 
 const {
     TESTS_GLOB,
     LEGACY_TESTS_GLOB,
     MULTIPLE_WINDOWS_TESTS_GLOB,
-    DEBUG_GLOB,
+    HEADED_CHROME_FIREFOX_TESTS_GLOB,
 } = require('./gulp/constants/functional-test-globs');
-
-const {
-    CLIENT_TESTS_SETTINGS,
-    CLIENT_TESTS_LOCAL_SETTINGS,
-    CLIENT_TESTS_LEGACY_SETTINGS,
-    CLIENT_TESTS_SAUCELABS_SETTINGS,
-    CLIENT_TESTS_DESKTOP_BROWSERS,
-    CLIENT_TESTS_MOBILE_BROWSERS,
-} = require('./gulp/constants/client-test-settings');
 
 const readFile = promisify(fs.readFile);
 
@@ -74,17 +64,6 @@ const NODE_MODULE_BINS = path.join(__dirname, 'node_modules/.bin');
 process.env.PATH = NODE_MODULE_BINS + path.delimiter + process.env.PATH + path.delimiter + NODE_MODULE_BINS;
 
 process.env.DEV_MODE = ('dev' in ARGS).toString();
-
-gulp.task('audit', () => {
-    return npmAuditor()
-        .then(result => {
-            process.stdout.write(result.report);
-            process.stdout.write('\n');
-
-            if (result.exitCode !== 0)
-                throw new Error('Security audit failed');
-        });
-});
 
 gulp.task('clean', () => {
     return del('lib');
@@ -249,22 +228,37 @@ gulp.step('images', () => {
         .pipe(gulp.dest('lib'));
 });
 
+gulp.step('esm-exportable-lib-script', () => {
+    return gulp
+        .src(['src/api/exportable-lib/index.mjs'])
+        .pipe(gulp.dest('lib/api/exportable-lib/'));
+});
+
 //NOTE: Executing tasks in parallel can cause out-of-memory errors on Azure Pipelines
 const buildTasks = process.env.TF_BUILD ? gulp.series : gulp.parallel;
 
-gulp.step('package-content', buildTasks('ts-defs', 'server-scripts', 'client-scripts', 'styles', 'images', 'templates'));
+gulp.step('package-content', buildTasks('ts-defs', 'server-scripts', 'client-scripts', 'esm-exportable-lib-script', 'styles', 'images', 'templates'));
 
 gulp.task('fast-build', gulp.series('clean', 'package-content'));
 
 gulp.task('build', process.env.DEV_MODE === 'true' ? gulp.registry().get('fast-build') : buildTasks('lint', 'fast-build'));
 
 // Test
+gulp.step('prepare-functional-tests', async () => {
+    return createPackageFilesForTests();
+});
+
+gulp.step('clean-functional-tests', async () => {
+    return del('test/functional/fixtures/**/package.json');
+});
+
 gulp.step('prepare-tests', gulp.registry().get(SKIP_BUILD ? 'lint' : 'build'));
 
 gulp.step('test-server-run', () => {
     const chai = require('chai');
 
     chai.use(require('chai-string'));
+    chai.use(require('chai-as-promised'));
 
     // HACK: We have to exit from all Gulp's error domains to avoid conflicts with error handling inside mocha tests
     const domains = exitDomains();
@@ -286,27 +280,50 @@ gulp.step('test-server-bootstrap', gulp.series('prepare-tests', 'test-server-run
 gulp.task('test-server', gulp.parallel('check-licenses', 'test-server-bootstrap'));
 
 gulp.step('test-client-run', () => {
+    const testClient                = require('./gulp/helpers/test-client');
+    const { CLIENT_TESTS_SETTINGS } = require('./gulp/constants/client-test-settings');
+
     return testClient('test/client/fixtures/**/*-test.js', CLIENT_TESTS_SETTINGS);
 });
 
 gulp.task('test-client', gulp.series('prepare-tests', 'test-client-run'));
 
 gulp.step('test-client-local-run', () => {
+    const testClient                      = require('./gulp/helpers/test-client');
+    const { CLIENT_TESTS_LOCAL_SETTINGS } = require('./gulp/constants/client-test-settings');
+
     return testClient('test/client/fixtures/**/*-test.js', CLIENT_TESTS_LOCAL_SETTINGS, {}, true);
 });
 
 gulp.task('test-client-local', gulp.series('prepare-tests', 'test-client-local-run'));
 
 gulp.step('test-client-legacy-run', () => {
+    const testClient                       = require('./gulp/helpers/test-client');
+    const { CLIENT_TESTS_LEGACY_SETTINGS } = require('./gulp/constants/client-test-settings');
+
     return testClient('test/client/legacy-fixtures/**/*-test.js', CLIENT_TESTS_LEGACY_SETTINGS);
 });
 
 gulp.task('test-client-legacy', gulp.series('prepare-tests', 'test-client-legacy-run'));
 
 gulp.step('test-client-travis-run', () => {
+    const testClient = require('./gulp/helpers/test-client');
+
+    const {
+        CLIENT_TESTS_SETTINGS,
+        CLIENT_TESTS_SAUCELABS_SETTINGS,
+        CLIENT_TESTS_DESKTOP_BROWSERS,
+    } = require('./gulp/constants/client-test-settings');
+
+
     const saucelabsSettings = CLIENT_TESTS_SAUCELABS_SETTINGS;
 
-    saucelabsSettings.browsers = CLIENT_TESTS_DESKTOP_BROWSERS;
+    saucelabsSettings.browsers = CLIENT_TESTS_DESKTOP_BROWSERS.filter(browserInfo => {
+        if (!process.env.CLIENT_TESTS_CURRENT_BROWSER)
+            return true;
+
+        return browserInfo.browserName.toLowerCase() === process.env.CLIENT_TESTS_CURRENT_BROWSER;
+    });
 
     return testClient('test/client/fixtures/**/*-test.js', CLIENT_TESTS_SETTINGS, saucelabsSettings);
 });
@@ -314,9 +331,27 @@ gulp.step('test-client-travis-run', () => {
 gulp.task('test-client-travis', gulp.series('prepare-tests', 'test-client-travis-run'));
 
 gulp.step('test-client-travis-mobile-run', () => {
+    const testClient = require('./gulp/helpers/test-client');
+
+    const {
+        CLIENT_TESTS_SETTINGS,
+        CLIENT_TESTS_SAUCELABS_SETTINGS,
+        CLIENT_TESTS_MOBILE_BROWSERS,
+    } = require('./gulp/constants/client-test-settings');
+
+    // NOTE: Test server on Android Emulator 7.1 and later can be accessed only via hostname.
+    // We are forced to add this variable to say the 'qunit-harness' module uses the hostname for the test server URL.
+    // https://github.com/AlexanderMoskovkin/qunit-harness/blob/master/src/index.js#L119
+    process.env.TRAVIS = true;
+
     const saucelabsSettings = CLIENT_TESTS_SAUCELABS_SETTINGS;
 
-    saucelabsSettings.browsers = CLIENT_TESTS_MOBILE_BROWSERS;
+    saucelabsSettings.browsers = CLIENT_TESTS_MOBILE_BROWSERS.filter(browserInfo => {
+        if (!process.env.CLIENT_TESTS_CURRENT_BROWSER)
+            return true;
+
+        return browserInfo.browserName.toLowerCase() === process.env.CLIENT_TESTS_CURRENT_BROWSER;
+    });
 
     return testClient('test/client/fixtures/**/*-test.js', CLIENT_TESTS_SETTINGS, saucelabsSettings);
 });
@@ -324,6 +359,14 @@ gulp.step('test-client-travis-mobile-run', () => {
 gulp.task('test-client-travis-mobile', gulp.series('prepare-tests', 'test-client-travis-mobile-run'));
 
 gulp.step('test-client-legacy-travis-run', () => {
+    const testClient = require('./gulp/helpers/test-client');
+
+    const {
+        CLIENT_TESTS_LEGACY_SETTINGS,
+        CLIENT_TESTS_SAUCELABS_SETTINGS,
+        CLIENT_TESTS_DESKTOP_BROWSERS,
+    } = require('./gulp/constants/client-test-settings');
+
     const saucelabsSettings = CLIENT_TESTS_SAUCELABS_SETTINGS;
 
     saucelabsSettings.browsers = CLIENT_TESTS_DESKTOP_BROWSERS;
@@ -334,6 +377,14 @@ gulp.step('test-client-legacy-travis-run', () => {
 gulp.task('test-client-legacy-travis', gulp.series('prepare-tests', 'test-client-legacy-travis-run'));
 
 gulp.step('test-client-legacy-travis-mobile-run', () => {
+    const testClient = require('./gulp/helpers/test-client');
+
+    const {
+        CLIENT_TESTS_LEGACY_SETTINGS,
+        CLIENT_TESTS_SAUCELABS_SETTINGS,
+        CLIENT_TESTS_MOBILE_BROWSERS,
+    } = require('./gulp/constants/client-test-settings');
+
     const saucelabsSettings = CLIENT_TESTS_SAUCELABS_SETTINGS;
 
     saucelabsSettings.browsers = CLIENT_TESTS_MOBILE_BROWSERS;
@@ -342,12 +393,6 @@ gulp.step('test-client-legacy-travis-mobile-run', () => {
 });
 
 gulp.task('test-client-legacy-travis-mobile', gulp.series('prepare-tests', 'test-client-legacy-travis-mobile-run'));
-
-gulp.step('test-functional-travis-desktop-osx-and-ms-edge-run', () => {
-    return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.osXDesktopAndMSEdgeBrowsers);
-});
-
-gulp.task('test-functional-travis-desktop-osx-and-ms-edge', gulp.series('prepare-tests', 'test-functional-travis-desktop-osx-and-ms-edge-run'));
 
 gulp.step('test-functional-travis-mobile-run', () => {
     return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.mobileBrowsers);
@@ -361,11 +406,11 @@ gulp.step('test-functional-local-run', () => {
 
 gulp.task('test-functional-local', gulp.series('prepare-tests', 'test-functional-local-run'));
 
-gulp.step('test-functional-local-ie-run', () => {
-    return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localBrowsersIE);
+gulp.step('test-functional-local-safari-run', () => {
+    return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localSafari);
 });
 
-gulp.task('test-functional-local-ie', gulp.series('prepare-tests', 'test-functional-local-ie-run'));
+gulp.task('test-functional-local-safari', gulp.series('prepare-tests', 'test-functional-local-safari-run'));
 
 gulp.step('test-functional-local-chrome-firefox-run', () => {
     return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localBrowsersChromeFirefox);
@@ -377,7 +422,13 @@ gulp.step('test-functional-local-headless-chrome-run', () => {
     return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localHeadlessChrome);
 });
 
-gulp.task('test-functional-local-headless-chrome', gulp.series('prepare-tests', 'test-functional-local-headless-chrome-run'));
+gulp.task('test-functional-local-headless-chrome', gulp.series('prepare-tests', 'prepare-functional-tests', 'test-functional-local-headless-chrome-run', 'clean-functional-tests'));
+
+gulp.step('test-functional-local-headless-edge-run', () => {
+    return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localHeadlessEdge);
+});
+
+gulp.task('test-functional-local-headless-edge', gulp.series('prepare-tests', 'test-functional-local-headless-edge-run'));
 
 gulp.step('test-functional-local-headless-firefox-run', () => {
     return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localHeadlessFirefox);
@@ -409,17 +460,23 @@ gulp.step('test-functional-local-multiple-windows-run', () => {
 
 gulp.task('test-functional-local-multiple-windows', gulp.series('prepare-tests', 'test-functional-local-multiple-windows-run'));
 
-gulp.step('test-functional-local-debug-run', () => {
-    return testFunctional(DEBUG_GLOB, functionalTestConfig.testingEnvironmentNames.localHeadlessChrome, { experimentalDebug: true });
+gulp.step('test-functional-local-multiple-windows-na-run', () => {
+    return testFunctional(MULTIPLE_WINDOWS_TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localChrome, { nativeAutomation: true });
 });
 
-gulp.task('test-functional-local-debug', gulp.series('prepare-tests', 'test-functional-local-debug-run'));
+gulp.task('test-functional-local-multiple-windows-na', gulp.series('prepare-tests', 'test-functional-local-multiple-windows-na-run'));
 
-gulp.step('test-functional-local-proxyless-run', () => {
-    return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localHeadlessChrome, { isProxyless: true });
+gulp.step('test-functional-local-chrome-firefox-headed-run', () => {
+    return testFunctional(HEADED_CHROME_FIREFOX_TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localBrowsersChromeFirefox);
 });
 
-gulp.task('test-functional-local-proxyless', gulp.series('prepare-tests', 'test-functional-local-proxyless-run'));
+gulp.task('test-functional-local-chrome-firefox-headed', gulp.series('prepare-tests', 'test-functional-local-chrome-firefox-headed-run'));
+
+gulp.step('test-functional-local-native-automation-run', () => {
+    return testFunctional(TESTS_GLOB, functionalTestConfig.testingEnvironmentNames.localHeadlessChrome, { nativeAutomation: true });
+});
+
+gulp.task('test-functional-local-native-automation', gulp.series('prepare-tests', 'test-functional-local-native-automation-run'));
 
 gulp.task('docker-build', done => {
     childProcess.execSync('npm pack', { env: process.env }).toString();

@@ -66,30 +66,42 @@ function error (err) {
 }
 
 async function runTests (argParser) {
-    const opts              = argParser.opts;
-    const port1             = opts.ports && opts.ports[0];
-    const port2             = opts.ports && opts.ports[1];
-    const proxy             = opts.proxy;
-    const proxyBypass       = opts.proxyBypass;
-    const configFile        = opts.configFile;
+    const opts        = argParser.opts;
+    const port1       = opts.ports && opts.ports[0];
+    const port2       = opts.ports && opts.ports[1];
+    const proxy       = opts.proxy;
+    const proxyBypass = opts.proxyBypass;
+    const configFile  = opts.configFile;
 
     log.showSpinner();
 
-    const { hostname, ssl, dev, experimentalDebug, retryTestPages, cache, disableHttp2, v8Flags } = opts;
+    const {
+        hostname,
+        ssl,
+        dev,
+        retryTestPages,
+        cache,
+        disableHttp2,
+        v8Flags,
+        disableCrossDomain,
+        esm,
+    } = opts;
 
     const testCafe = await createTestCafe({
         developmentMode: dev,
+        isCli:           true,
 
         hostname,
         port1,
         port2,
         ssl,
-        experimentalDebug,
         retryTestPages,
         cache,
         configFile,
         disableHttp2,
         v8Flags,
+        disableCrossDomain,
+        esm,
     });
 
     const correctedBrowsersAndSources = await correctBrowsersAndSources(argParser, testCafe.configuration);
@@ -101,8 +113,6 @@ async function runTests (argParser) {
     const runner = opts.live ? testCafe.createLiveModeRunner() : testCafe.createRunner();
 
     let failed = 0;
-
-    runner.isCli = true;
 
     runner
         .useProxy(proxy, proxyBypass)
@@ -125,7 +135,6 @@ async function runTests (argParser) {
 
         failed = await runner.run(runOpts);
     }
-
     finally {
         showMessageOnExit = false;
         await testCafe.close();
@@ -148,10 +157,10 @@ async function listBrowsers (providerName) {
         if (providerName === 'locally-installed')
             console.log(browserNames.join('\n'));
         else
-            console.log(browserNames.map(browserName => `"${providerName}:${browserName}"`).join('\n'));
+            console.log(browserNames.map(browserName => `"${ providerName }:${ browserName }"`).join('\n'));
     }
     else
-        console.log(`"${providerName}"`);
+        console.log(`"${ providerName }"`);
 
     exit(0);
 }

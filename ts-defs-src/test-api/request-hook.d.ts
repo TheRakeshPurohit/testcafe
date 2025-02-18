@@ -6,12 +6,12 @@ interface RequestHook {
     /**
      * The `onRequest` method is called before sending the request.
      */
-    onRequest(requestEvent: object): Promise<void>;
+    onRequest(requestEvent: object): Promise<void> | void;
 
     /**
      * The `onResponse` method is called after sending the request
      */
-    onResponse(responseEvent: object): Promise<void>;
+    onResponse(responseEvent: object): Promise<void> | void;
 }
 
 
@@ -84,8 +84,8 @@ interface RequestData {
      */
     headers: Record<string, string>;
     /**
-     * The response body. Logged if the `logResponseBody` option is set to `true`.
-     * A [Buffer](https://nodejs.org/api/buffer.html) or string depending on the `stringifyResponseBody` option.
+     * The request body. Logged if the `logRequestBody` option is set to `true`.
+     * A [Buffer](https://nodejs.org/api/buffer.html) or string depending on the `stringifyRequestBody` option.
      */
     body: string | Buffer;
     /**
@@ -100,12 +100,11 @@ interface ResponseData {
      */
     statusCode: number;
     /**
-     * Response headers in the property-value form. Logged if the `logResponseHeaders` option is set to true.
+     * Response headers in the property-value form. Logged if the `logResponseHeaders` option is set to `true`.
      */
     headers: Record<string, string>;
     /**
-     * The response body.
-     * Logged if the `logResponseBody` option is set to true.
+     * The response body. Logged if the `logResponseBody` option is set to `true`.
      * A [Buffer](https://nodejs.org/api/buffer.html) or string depending on the `stringifyResponseBody` option.
      */
     body: string | Buffer;
@@ -151,14 +150,14 @@ interface RequestMock {
      * Specifies requests to intercept
      * @param filter - Specifies which requests should be mocked with a response that follows in the `respond` method.
      */
-    onRequestTo(filter: string | RegExp | object | ((req: RequestOptions) => boolean)): RequestMock;
+    onRequestTo(filter: string | RegExp | object | ((req: RequestMockOptions) => boolean)): RequestMock;
     /**
      * Specifies the mocked response.
      * @param body - The mocked response body.
      * @param statusCode - The response status code.
      * @param headers - Custom headers added to the response in the property-value form.
      */
-    respond(body?: object | string | ((req: RequestOptions, res: ResponseMock) => Promise<void>), statusCode?: number, headers?: Record<string, string>): RequestMock;
+    respond(body?: object | string | ((req: RequestMockOptions, res: ResponseMock) => Promise<void> | void), statusCode?: number, headers?: Record<string, string>): RequestMock;
 }
 
 interface RequestMockFactory {
@@ -166,9 +165,9 @@ interface RequestMockFactory {
 }
 
 /**
- * {@link https://devexpress.github.io/testcafe/documentation/reference/test-api/requestmock/respond.html#requestoptions See documentation}.
+ * {@link https://testcafe.io/documentation/402762/reference/test-api/requestmock/respond#requestoptions See documentation}.
  */
-interface RequestOptions {
+interface RequestMockOptions {
     /** The request headers in the property-value form. */
     headers: Record<string, string>;
     /** The request body. */
@@ -195,7 +194,7 @@ interface RequestOptions {
      * Credentials that were used for authentication in the current session using NTLM or Basic
      * authentication. For HTTP Basic authentication, these are `username` and `password`. NTLM
      * authentication additionally specifies `workstation` and `domain`.
-     * See {@link https://devexpress.github.io/testcafe/documentation/guides/advanced-guides/authentication.html#http-authentication HTTP Authentication}.
+     * See {@link https://testcafe.io/documentation/402845/guides/intermediate-guides/authentication?search#http-authentication HTTP Authentication}.
      */
     credentials: Record<string, string>;
     /**

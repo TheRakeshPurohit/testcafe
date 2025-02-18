@@ -14,6 +14,10 @@ export default {
         return this.openedBrowsers[browserId].activeWindowId;
     },
 
+    resetActiveWindowId (browserId) {
+        this.openedBrowsers[browserId].activeWindowId = this.openedBrowsers[browserId].nativeAutomation?.windowId;
+    },
+
     setActiveWindowId (browserId, val) {
         this.openedBrowsers[browserId].activeWindowId = val;
     },
@@ -101,31 +105,18 @@ export default {
         await this.resizeWindow(browserId, maximumSize.width, maximumSize.height, maximumSize.width, maximumSize.height);
     },
 
-    async executeClientFunction (browserId, command, callsite) {
-        const runtimeInfo   = this.openedBrowsers[browserId];
-        const browserClient = this._getBrowserProtocolClient(runtimeInfo);
-
-        return browserClient.executeClientFunction(command, callsite);
+    async maximizeWindowNativeAutomation (browserId) {
+        await this.maximizeWindowNativeAutomation(browserId);
     },
 
-    async executeSelector ({ browserId, command, callsite, selectorTimeout }) {
-        const runtimeInfo   = this.openedBrowsers[browserId];
-        const browserClient = this._getBrowserProtocolClient(runtimeInfo);
-
-        return browserClient.executeSelector(command, callsite, selectorTimeout);
+    async resizeWindowNativeAutomation (browserId, width, height, currentWidth, currentHeight) {
+        await this.resizeBounds(browserId, width, height, currentWidth, currentHeight);
     },
 
-    async switchToIframe ({ browserId, command, callsite, selectorTimeout }) {
+    async closeBrowserChildWindow (browserId, windowId) {
         const runtimeInfo   = this.openedBrowsers[browserId];
         const browserClient = this._getBrowserProtocolClient(runtimeInfo);
 
-        return browserClient.switchToIframe(command, callsite, selectorTimeout);
-    },
-
-    async switchToMainWindow (browserId) {
-        const runtimeInfo   = this.openedBrowsers[browserId];
-        const browserClient = this._getBrowserProtocolClient(runtimeInfo);
-
-        return browserClient.switchToMainWindow();
+        return browserClient.closeBrowserChildWindow(windowId);
     },
 };

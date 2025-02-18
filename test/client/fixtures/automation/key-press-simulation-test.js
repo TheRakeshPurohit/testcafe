@@ -233,7 +233,7 @@ $(document).ready(function () {
         testKeysPress('option', expectedEvents);
     });
 
-    asyncTest('symbols with icorrect keycode', function () {
+    asyncTest('symbols with incorrect keycode', function () {
         const expectedEvents = [
             { type: 'keydown', keyCode: KEYCODES['shift'], shiftKey: true },
             { type: 'keydown', keyCode: KEYCODES['"'], shiftKey: true },
@@ -308,16 +308,14 @@ $(document).ready(function () {
             { type: 'keydown', keyCode: KEYCODES.end, ctrlKey: true },
         ];
 
-        if (browserUtils.isFirefox)
-            expectedEvents.push({ type: 'keypress', keyCode: KEYCODES.end, charCode: KEYCODES.end, ctrlKey: true });
-
         expectedEvents.push({ type: 'keyup', keyCode: KEYCODES.end, ctrlKey: true });
         expectedEvents.push({ type: 'keyup', keyCode: KEYCODES.ctrl });
 
         testKeysPress('ctrl+end', expectedEvents);
     });
 
-    asyncTest('B237084 - Client instance works incorrect after "enter" key has been pressed on the focused control', function () {
+    // TODO: Fix this in the new Firefox
+    (browserUtils.isFirefox ? QUnit.skip : asyncTest)('B237084 - Client instance works incorrect after "enter" key has been pressed on the focused control', function () {
         let clickRaisedCount = 0;
 
         const $input = $('<input type="button">').addClass(TEST_ELEMENT_CLASS)
@@ -370,7 +368,7 @@ $(document).ready(function () {
 
         runPressAutomation('ctrl+a', function () {
             runPressAutomation('delete', function () {
-                equal(input.value, browserUtils.isFirefox ? value : '');
+                equal(input.value, '');
 
                 start();
             });

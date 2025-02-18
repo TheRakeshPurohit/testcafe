@@ -2,51 +2,80 @@ import renderTemplate from '../utils/render-template';
 import TestRun from '../test-run';
 import MessageBus from '../utils/message-bus';
 
+export interface WarningLogMessage {
+    message: string;
+    actionId: string | null;
+}
+
+type WarningLogCallback = (message: string, actionId: string | null) => Promise<void>;
+
 export default class WarningLog {
-    public messages: string[];
+    public messageInfos: WarningLogMessage[];
     public globalLog: WarningLog | null;
-    public callback?: (message: string) => Promise<void>;
+    public callback?: WarningLogCallback;
+    private _isCopying: boolean;
 
-    public constructor (globalLog: WarningLog | null = null, callback?: (message: string) => Promise<void>) {
-        this.globalLog = globalLog;
-        this.messages  = [];
-        this.callback  = callback;
+    public constructor (globalLog: WarningLog | null = null, callback?: WarningLogCallback) {
+        this.messageInfos = [];
+        this.globalLog    = globalLog;
+        this.callback     = callback;
+        this._isCopying   = false;
     }
 
-    public addPlainMessage (msg: string): void {
+    public get messages (): string[] {
+        return this.messageInfos.map(msg => msg.message);
+    }
+
+    public addPlainMessage (msg: WarningLogMessage): void {
         // NOTE: avoid duplicates
-        if (!this.messages.includes(msg))
-            this.messages.push(msg);
+        if (!this.messageInfos.find(m => m.message === msg.message))
+            this.messageInfos.push(msg);
     }
 
-    public addWarning (...args: any[]): void {
-        // @ts-ignore
-        const msg = renderTemplate.apply(null, args);
+    public addWarning (msg: WarningLogMessage | string, ...args: any[]): void {
+        let message  = '';
+        let actionId = null;
 
-        this.addPlainMessage(msg);
+        if (typeof msg !== 'string')
+            ({ message, actionId } = msg);
+        else
+            message = msg;
+
+        args = [message].concat(args);
+
+        // @ts-ignore
+        message = renderTemplate.apply(null, args); // eslint-disable-line prefer-spread
+
+        this.addPlainMessage({ message, actionId });
 
         if (this.globalLog)
-            this.globalLog.addPlainMessage(msg);
+            this.globalLog.addPlainMessage({ message, actionId });
 
-        if (this.callback)
-            this.callback(msg);
+        if (this.callback && !this._isCopying)
+            this.callback(message, actionId);
     }
 
     public clear (): void {
-        this.messages = [];
+        this.messageInfos = [];
     }
 
-    public copyTo (warningLog: WarningLog): void {
-        this.messages.forEach(msg => warningLog.addWarning(msg));
+    public copyFrom (warningLog: WarningLog): void {
+        this._isCopying = true;
+        warningLog.messages.forEach(msg => this.addWarning(msg));
+        this._isCopying = false;
     }
 
-    public static createAddWarningCallback (messageBus?: MessageBus | object, testRun?: TestRun): (message: string) => Promise<void> {
-        return async (message: string) => {
+    public static createAddWarningCallback (messageBus?: MessageBus | object, testRun?: TestRun): WarningLogCallback {
+        return async (message: string, actionId: string | null) => {
             if (messageBus && messageBus instanceof MessageBus) {
-                await messageBus.emit('warning-add', {
+                const warning = {
                     message,
                     testRun,
-                });
+                    actionId,
+                };
+
+                await messageBus.emit('before-warning-add', warning);
+                await messageBus.emit('warning-add', warning);
             }
         };
     }

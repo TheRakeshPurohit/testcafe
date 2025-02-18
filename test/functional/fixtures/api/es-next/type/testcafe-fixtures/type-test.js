@@ -1,5 +1,5 @@
 // NOTE: to preserve callsites, add new tests AFTER the existing ones
-import { ClientFunction } from 'testcafe';
+import { ClientFunction, Selector } from 'testcafe';
 import { expect } from 'chai';
 
 fixture `Type`
@@ -25,4 +25,18 @@ test('Incorrect action text', async t => {
 
 test('Incorrect action options', async t => {
     await t.typeText('#input', 'a', { replace: null, paste: null });
+});
+
+test('Not found selector', async t => {
+    await t.typeText('#not-found', 'a');
+});
+
+test('Enable the `paste` option', async t => {
+    const input = Selector('#input');
+
+    await t.typeText(input, 'qwerty', { replace: true, paste: true });
+    await t.expect(input.value).eql('qwerty');
+
+    await t.typeText(input, 'qwerty', { replace: false, paste: true });
+    await t.expect(input.value).eql('qwertyqwerty');
 });

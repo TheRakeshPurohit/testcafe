@@ -22,11 +22,20 @@ import {
     ActionFunctionArgumentError,
     SetTestSpeedArgumentError,
     ForbiddenCharactersInScreenshotPathError,
+    ActionCookieArgumentError,
+    ActionCookieArgumentsError,
+    ActionUrlCookieArgumentError,
+    ActionUrlsCookieArgumentError,
+    ActionRequiredCookieArguments,
+    ActionUrlArgumentError,
+    ActionSkipJsErrorsArgumentTypeError,
 } from '../../../errors/test-run';
 
+import { URL } from 'url';
 import { assertPageUrl } from '../../../api/test-page-url';
 import checkFilePath from '../../../utils/check-file-path';
-
+import { castArray } from 'lodash';
+import assertRequestHookType from '../../../api/request-hooks/assert-type';
 
 // Validators
 export const integerArgument         = createIntegerValidator(ActionIntegerArgumentError);
@@ -46,7 +55,6 @@ export function actionOptions (name, val) {
     if (type !== 'object' && val !== null && val !== void 0)
         throw new ActionOptionsTypeError(type);
 }
-
 
 export function stringArgument (argument, val, createError) {
     if (!createError)
@@ -75,7 +83,7 @@ export function nullableStringArgument (argument, val) {
         throw new ActionNullableStringArgumentError(argument, type);
 }
 
-export function urlArgument (name, val) {
+export function pageUrlArgument (name, val) {
     nonEmptyStringArgument(name, val);
 
     assertPageUrl(val.trim(), 'navigateTo');
@@ -126,4 +134,66 @@ export function screenshotPathArgument (name, val) {
 export function functionArgument (name, val) {
     if (typeof val !== 'function')
         throw new ActionFunctionArgumentError(name, val);
+}
+
+function isValidCookie (cookie) {
+    return !!cookie && (typeof cookie === 'object' || typeof cookie === 'string');
+}
+
+export function cookiesArgument (name, val) {
+    const cookiesLength = val.length;
+
+    for (const [i, value] of val.entries()) {
+        if (!isValidCookie(value)) {
+            throw cookiesLength === 1
+                ? new ActionCookieArgumentError()
+                : new ActionCookieArgumentsError(i, value);
+        }
+    }
+}
+
+export function setCookiesArgument (name, val) {
+    if (!val.length)
+        throw new ActionRequiredCookieArguments();
+
+    cookiesArgument(name, val);
+}
+
+function isValidUrl (url) {
+    try {
+        return new URL(url) && true;
+    }
+    catch {
+        return false;
+    }
+}
+
+export function urlsArgument (name, val) {
+    const castVal = castArray(val);
+
+    for (const [i, value] of castVal.entries()) {
+        if (!isValidUrl(value)) {
+            throw castVal.length === 1
+                ? new ActionUrlCookieArgumentError()
+                : new ActionUrlsCookieArgumentError(i, value);
+        }
+    }
+}
+
+export function urlArgument (name, val) {
+    const valType = typeof val;
+
+    if (valType !== 'string' && !(val instanceof URL))
+        throw new ActionUrlArgumentError(name, valType);
+}
+
+export function skipJsErrorOptions (name, val) {
+    const valType = typeof val;
+
+    if (valType !== 'undefined' && valType !== 'object' && valType !== 'boolean' && valType !== 'function')
+        throw new ActionSkipJsErrorsArgumentTypeError(name, valType);
+}
+
+export function requestHooksArgument (name, val) {
+    assertRequestHookType(val);
 }

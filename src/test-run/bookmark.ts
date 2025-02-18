@@ -12,12 +12,12 @@ import {
 
 import { CurrentIframeNotFoundError, CurrentIframeIsNotLoadedError } from '../errors/test-run';
 import TestRun from './index';
-import { ExecuteClientFunctionCommand, ExecuteSelectorCommand } from './commands/observation';
-import Role from '../role/role';
+import { ExecuteClientFunctionCommand, ExecuteSelectorCommand } from './commands/execute-client-function';
+import Role, { RedirectUrl } from '../role/role';
 import { DEFAULT_SPEED_VALUE } from '../configuration/default-values';
 import BrowserConsoleMessages from './browser-console-messages';
 import { CommandBase } from './commands/base';
-import { CallsiteRecord } from 'callsite-record';
+import { CallsiteRecord } from '@devexpress/callsite-record';
 
 export default class TestRunBookmark {
     private readonly testRun: TestRun;
@@ -50,31 +50,13 @@ export default class TestRunBookmark {
     }
 
     private async _initCtxs (): Promise<void> {
-        if (this.testRun.compilerService) {
-            this.ctx        = await this.testRun.compilerService.getCtx({ testRunId: this.testRun.id });
-            this.fixtureCtx = await this.testRun.compilerService.getFixtureCtx({ testRunId: this.testRun.id });
-        }
-        else {
-            this.ctx        = this.testRun.ctx;
-            this.fixtureCtx = this.testRun.fixtureCtx as object;
-        }
+        this.ctx        = this.testRun.ctx;
+        this.fixtureCtx = this.testRun.fixtureCtx as object;
     }
 
     private async _restoreCtxs (): Promise<void> {
-        if (this.testRun.compilerService) {
-            await this.testRun.compilerService.setCtx({
-                testRunId: this.testRun.id,
-                value:     this.ctx as object,
-            });
-            await this.testRun.compilerService.setFixtureCtx({
-                testRunId: this.testRun.id,
-                value:     this.fixtureCtx as object,
-            });
-        }
-        else {
-            this.testRun.ctx        = this.ctx as object;
-            this.testRun.fixtureCtx = this.fixtureCtx;
-        }
+        this.testRun.ctx        = this.ctx as object;
+        this.testRun.fixtureCtx = this.fixtureCtx;
     }
 
     public async init (): Promise<void> {
@@ -120,7 +102,7 @@ export default class TestRunBookmark {
             try {
                 await this.testRun.executeCommand(switchWorkingFrameCommand as CommandBase);
             }
-            catch (err) {
+            catch (err: any) {
                 if (err.code === TEST_RUN_ERRORS.actionElementNotFoundError)
                     throw new CurrentIframeNotFoundError();
 
@@ -158,12 +140,16 @@ export default class TestRunBookmark {
 
             const preserveUrl = this.role.opts.preserveUrl;
 
-            await this._restorePage(this.role.redirectUrl as string, stateSnapshot);
+            const redirectUrl = preserveUrl
+                ? this.role.redirectUrl as string
+                : (this.role.redirectUrl as RedirectUrl)[this.testRun.test.id];
+
+            await this._restorePage(redirectUrl, stateSnapshot);
 
             if (!preserveUrl)
                 await this._restoreWorkingFrame();
         }
-        catch (err) {
+        catch (err: any) {
             err.callsite = callsite;
 
             throw err;

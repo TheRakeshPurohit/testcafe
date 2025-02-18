@@ -13,7 +13,7 @@ const complexRole = Role(page, async t => {
 });
 
 const errorRole = Role(page, async t => {
-    await t.click(Selector('#non-existing-element'), { timeout: 100 });
+    await t.click(Selector('#non-existing-element', { timeout: 100 }));
 });
 
 const foo = ClientFunction(bool => () => bool);
@@ -25,6 +25,7 @@ async function errorCheck (t) {
 
 test('Simple test', async t => {
     await t.wait(1);
+    await t.report();
 });
 
 test('Simple command test', async t => {
@@ -75,6 +76,12 @@ test('Screenshot on action error', async t => {
     await t.click('#unexisting-element');
 });
 
+test('Take a screenshot on action and on error', async t => {
+    await t
+        .takeScreenshot()
+        .click('#unexisting-element');
+});
+
 test('Action done after test done', async t => {
     await t
         .wait(5000)
@@ -123,4 +130,12 @@ test('Take screenshots with same path', async t => {
     await t
         .takeScreenshot('1.png')
         .takeScreenshot('1.png');
+});
+
+test('Repeated role error', async t => {
+    await t.useRole(errorRole);
+});
+
+test('Repeated role error', async t => {
+    await t.useRole(errorRole);
 });

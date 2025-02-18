@@ -5,6 +5,8 @@
 
 /// <reference path="../test-api/client-script.d.ts" />
 /// <reference path="../test-api/action-options.d.ts" />
+/// <reference path="../test-api/skip-js-errors-options.d.ts" />
+/// <reference path="../test-api/test-info.d.ts" />
 // {{/allowReferences}}
 
 type TlsOptions = import('tls').TlsOptions;
@@ -26,12 +28,12 @@ interface BrowserConnection {
     once(event: 'ready', callback: Function): void;
 }
 
-interface BrowserDescriptor { 
-    path: string; 
-    cmd?: string; 
+interface BrowserDescriptor {
+    path: string;
+    cmd?: string;
 }
 
-type BrowserOption  = string | BrowserConnection | BrowserDescriptor;
+type BrowserOption = string | BrowserConnection | BrowserDescriptor;
 type BrowserOptions = BrowserOption | BrowserOption [];
 
 type CompilerOptions = {
@@ -41,8 +43,6 @@ type CompilerOptions = {
 type ConcurrencyOption = number;
 
 type ClientScriptOptions = ClientScript | ClientScript [];
-
-type Metadata = Record<string, string>;
 
 /**
 * Allows you to select which tests should be run.
@@ -59,7 +59,7 @@ type FilterFunction = (
     fixturePath: string,
     testMeta: Metadata,
     fixtureMeta: Metadata
-) => Promise<boolean>;
+) => Promise<boolean> | boolean;
 
 interface FilterDescriptor {
     test?: string;
@@ -67,18 +67,18 @@ interface FilterDescriptor {
     fixture?: string;
     fixtureGrep?: string;
     testMeta?: Metadata;
-    fixtureMeta?: Metadata;    
+    fixtureMeta?: Metadata;
 }
 
-interface ReporterDescriptor { 
+interface ReporterDescriptor {
     name: string;
-    output?: string | NodeJS.WritableStream; 
+    output?: string | NodeJS.WritableStream;
 }
 
-type ReporterOption  = string | ReporterDescriptor;
+type ReporterOption = string | ReporterDescriptor;
 type ReporterOptions = ReporterOption | ReporterOptions [];
 
-type SourceOption  = string;
+type SourceOption = string;
 type SourceOptions = SourceOption | SourceOption [];
 
 interface ScreenshotsOptions extends TakeScreenshotOptions {
@@ -188,11 +188,16 @@ interface ProxyOptions {
     bypassRules?: string | string [];
 }
 
+interface QuarantineModeOptions {
+    attemptLimit?: number;
+    successThreshold?: number;
+}
+
 interface RunOptions {
     /**
-     * Defines whether to continue running a test after a JavaScript error occurs on a page (`true`), or consider such a test failed (`false`).
+     * Defines the framework's response to client-side JavaScript errors. If `false` (the default value), tests fail after the website yields a client-side error. If `true`, TestCafe ignores JavaScript errors. Additional options set custom error handling criteria.
      */
-    skipJsErrors: boolean;
+    skipJsErrors: boolean | SkipJsErrorsOptionsObject | SkipJsErrorsCallback | SkipJsErrorsCallbackWithOptionsObject;
     /**
      * Defines whether to continue running a test after an uncaught error or unhandled promise rejection occurs on the server (`true`), or consider such a test failed (`false`).
      */
@@ -200,7 +205,7 @@ interface RunOptions {
     /**
      * Defines whether to enable quarantine mode and (optionally) what settings to use.
      */
-    quarantineMode: boolean | Record<string, string>;
+    quarantineMode: boolean | QuarantineModeOptions;
     /**
      * Specifies if tests run in the debug mode. If this option is enabled, test execution is paused before the first action or assertion allowing you to invoke the developer tools and debug. In the debug mode, you can execute the test step-by-step to reproduce its incorrect behavior. You can also use the Unlock Page switch in the footer to unlock the tested page and interact with its elements.
      */
@@ -249,7 +254,26 @@ interface RunOptions {
      * Prevents TestCafe from taking screenshots. When this option is specified, screenshots are not taken whenever a test fails or when t.takeScreenshot or t.takeElementScreenshot is executed.
      */
     disableScreenshots: boolean;
+    /**
+     * Time (in milliseconds). If a test is unresponsive for the specified length of time, TestCafe terminates it. Only applies to test contents.
+     */
+    testExecutionTimeout: number;
+    /**
+     * Time (in milliseconds). If TestCafe is idle for the specified length of time, TestCafe terminates the test run. Applies to actions inside and outside tests.
+     */
+    runExecutionTimeout: number;
+    /**
+     * Disables support for multi-window testing in Chrome and Firefox. Use this option if you encounter compatibility issues with your existing tests.
+     */
     disableMultipleWindows: boolean;
+    /**
+     * Disables native automation of Chromium-based browsers. Use this option to speed up browser automation and increase test stability.
+     */
+    disableNativeAutomation: boolean;
+     /**
+     * Allows you to import modules that do not support CommonJS.
+     */
+    esm: boolean;
 }
 
 interface StartOptions {
@@ -261,7 +285,7 @@ interface StartOptions {
     retryTestPages: boolean;
     cache: boolean;
     configFile: string;
-    disableHttp2: boolean;    
+    disableHttp2: boolean;
 }
 
 interface ColorOutputOptions {

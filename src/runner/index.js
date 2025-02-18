@@ -2,6 +2,7 @@ import { resolve as resolvePath, dirname } from 'path';
 import debug from 'debug';
 import promisifyEvent from 'promisify-event';
 import { EventEmitter } from 'events';
+
 import {
     flattenDeep as flatten,
     pull as remove,
@@ -45,22 +46,24 @@ import detectDisplay from '../utils/detect-display';
 import { validateQuarantineOptions } from '../utils/get-options/quarantine';
 import logEntry from '../utils/log-entry';
 import MessageBus from '../utils/message-bus';
+import { validateSkipJsErrorsOptionValue } from '../utils/get-options/skip-js-errors';
 
 const DEBUG_LOGGER = debug('testcafe:runner');
 
 export default class Runner extends EventEmitter {
-    constructor ({ proxy, browserConnectionGateway, configuration, compilerService }) {
+    constructor ({ proxy, browserConnectionGateway, configuration }) {
         super();
 
         this._messageBus         = new MessageBus();
         this.proxy               = proxy;
-        this.bootstrapper        = this._createBootstrapper(browserConnectionGateway, compilerService, this._messageBus);
+        this.bootstrapper        = this._createBootstrapper(browserConnectionGateway, this._messageBus, configuration);
         this.pendingTaskPromises = [];
         this.configuration       = configuration;
-        this.isCli               = false;
+        this.isCli               = configuration._options && configuration._options.isCli;
         this.warningLog          = new WarningLog(null, WarningLog.createAddWarningCallback(this._messageBus));
-        this.compilerService     = compilerService;
         this._options            = {};
+        this._hasTaskErrors      = false;
+        this._reporters          = null;
 
         this.apiMethodWasCalled = new FlagList([
             OPTION_NAMES.src,
@@ -70,8 +73,8 @@ export default class Runner extends EventEmitter {
         ]);
     }
 
-    _createBootstrapper (browserConnectionGateway, compilerService, messageBus) {
-        return new Bootstrapper({ browserConnectionGateway, compilerService, messageBus });
+    _createBootstrapper (browserConnectionGateway, messageBus, configuration) {
+        return new Bootstrapper({ browserConnectionGateway, messageBus, configuration });
     }
 
     _disposeBrowserSet (browserSet) {
@@ -88,7 +91,6 @@ export default class Runner extends EventEmitter {
 
     async _disposeTaskAndRelatedAssets (task, browserSet, reporters, testedApp) {
         task.abort();
-        task.unRegisterClientScriptRouting();
         task.clearListeners();
         this._messageBus.abort();
 
@@ -139,12 +141,16 @@ export default class Runner extends EventEmitter {
         return failedTestCount;
     }
 
-    async _getTaskResult (task, browserSet, reporters, testedApp) {
+    async _getTaskResult (task, browserSet, reporters, testedApp, runnableConfigurationId) {
         if (!task.opts.live) {
-            task.on('browser-job-done', job => {
-                job.browserConnections.forEach(bc => browserSet.releaseConnection(bc));
+            task.on('browser-job-done', async job => {
+                await Promise.all(job.browserConnections.map(async bc => {
+                    await browserSet.releaseConnection(bc);
+                }));
             });
         }
+
+        this._messageBus.clearListeners('error');
 
         const browserSetErrorPromise = promisifyEvent(browserSet, 'error');
         const taskErrorPromise       = promisifyEvent(task, 'error');
@@ -171,7 +177,9 @@ export default class Runner extends EventEmitter {
             await Promise.race(promises);
         }
         catch (err) {
-            await this._disposeTaskAndRelatedAssets(task, browserSet, reporters, testedApp);
+            await this._messageBus.emit('unhandled-rejection');
+            await Promise.all(reporters.map(reporter => reporter.taskInfo.pendingTaskDonePromise));
+            await this._disposeTaskAndRelatedAssets(task, browserSet, reporters, testedApp, runnableConfigurationId);
 
             throw err;
         }
@@ -191,30 +199,32 @@ export default class Runner extends EventEmitter {
             proxy,
             opts,
             runnerWarningLog: warningLog,
-            compilerService:  this.compilerService,
             messageBus:       this._messageBus,
         });
     }
 
-    _runTask ({ reporters, browserSet, tests, testedApp, options }) {
+    _runTask ({ reporters, browserSet, tests, testedApp, options, runnableConfigurationId }) {
         const task              = this._createTask(tests, browserSet.browserConnectionGroups, this.proxy, options, this.warningLog);
-        const completionPromise = this._getTaskResult(task, browserSet, reporters, testedApp);
+        const completionPromise = this._getTaskResult(task, browserSet, reporters, testedApp, runnableConfigurationId);
         let completed           = false;
 
         this._messageBus.on('start', startHandlingTestErrors);
 
         if (!this.configuration.getOption(OPTION_NAMES.skipUncaughtErrors)) {
             this._messageBus.on('test-run-start', addRunningTest);
-            this._messageBus.on('test-run-done', removeRunningTest);
+            this._messageBus.on('test-run-done', ({ errs }) => {
+                if (errs.length)
+                    this._hasTaskErrors = true;
+
+                removeRunningTest();
+            });
         }
 
         this._messageBus.on('done', stopHandlingTestErrors);
-
+        this._messageBus.on('before-test-run-created-error', stopHandlingTestErrors);
         task.on('error', stopHandlingTestErrors);
 
         const onTaskCompleted = () => {
-            task.unRegisterClientScriptRouting();
-
             completed = true;
         };
 
@@ -224,7 +234,7 @@ export default class Runner extends EventEmitter {
 
         const cancelTask = async () => {
             if (!completed)
-                await this._disposeTaskAndRelatedAssets(task, browserSet, reporters, testedApp);
+                await this._disposeTaskAndRelatedAssets(task, browserSet, reporters, testedApp, runnableConfigurationId);
         };
 
         return { completionPromise, cancelTask };
@@ -274,6 +284,30 @@ export default class Runner extends EventEmitter {
             throw new GeneralError(RUNTIME_ERRORS.cannotSetConcurrencyWithCDPPort);
     }
 
+    _validateSkipJsErrorsOption () {
+        const skipJsErrorsOptions = this.configuration.getOption(OPTION_NAMES.skipJsErrors);
+
+        if (!skipJsErrorsOptions)
+            return;
+
+        validateSkipJsErrorsOptionValue(skipJsErrorsOptions, GeneralError);
+    }
+
+    _validateCustomActionsOption () {
+        const customActions = this.configuration.getOption(OPTION_NAMES.customActions);
+
+        if (!customActions)
+            return;
+
+        if (typeof customActions !== 'object')
+            throw new GeneralError(RUNTIME_ERRORS.invalidCustomActionsOptionType);
+
+        for (const name in customActions) {
+            if (typeof customActions[name] !== 'function')
+                throw new GeneralError(RUNTIME_ERRORS.invalidCustomActionType, name, typeof customActions[name]);
+        }
+    }
+
     async _validateBrowsers () {
         const browsers = this.configuration.getOption(OPTION_NAMES.browsers);
 
@@ -317,7 +351,7 @@ export default class Runner extends EventEmitter {
     }
 
     _getScreenshotOptions () {
-        let { path, pathPattern } = this.configuration.getOption(OPTION_NAMES.screenshots) || {};
+        let { path, pathPattern, pathPatternOnFails } = this.configuration.getOption(OPTION_NAMES.screenshots) || {};
 
         if (!path)
             path = this.configuration.getOption(OPTION_NAMES.screenshotPath);
@@ -325,11 +359,14 @@ export default class Runner extends EventEmitter {
         if (!pathPattern)
             pathPattern = this.configuration.getOption(OPTION_NAMES.screenshotPathPattern);
 
-        return { path, pathPattern };
+        if (!pathPatternOnFails)
+            pathPatternOnFails = this.configuration.getOption(OPTION_NAMES.screenshotPathPatternOnFails);
+
+        return { path, pathPattern, pathPatternOnFails };
     }
 
     _validateScreenshotOptions () {
-        const { path, pathPattern } = this._getScreenshotOptions();
+        const { path, pathPattern, pathPatternOnFails } = this._getScreenshotOptions();
 
         const disableScreenshots = this.configuration.getOption(OPTION_NAMES.disableScreenshots) || !path;
 
@@ -348,6 +385,12 @@ export default class Runner extends EventEmitter {
             this._validateScreenshotPath(pathPattern, 'screenshots path pattern');
 
             this.configuration.mergeOptions({ [OPTION_NAMES.screenshots]: { pathPattern } });
+        }
+
+        if (pathPatternOnFails) {
+            this._validateScreenshotPath(pathPatternOnFails, 'screenshots path pattern on fails');
+
+            this.configuration.mergeOptions({ [OPTION_NAMES.screenshots]: { pathPatternOnFails } });
         }
     }
 
@@ -423,7 +466,7 @@ export default class Runner extends EventEmitter {
         const quarantineMode = this.configuration.getOption(OPTION_NAMES.quarantineMode);
 
         if (typeof quarantineMode === 'object')
-            validateQuarantineOptions(quarantineMode, OPTION_NAMES.quarantineMode);
+            validateQuarantineOptions(quarantineMode);
     }
 
     async _validateRunOptions () {
@@ -438,6 +481,8 @@ export default class Runner extends EventEmitter {
         this._validateRequestTimeoutOption(OPTION_NAMES.ajaxRequestTimeout);
         this._validateQuarantineOptions();
         this._validateConcurrencyOption();
+        this._validateSkipJsErrorsOption();
+        this._validateCustomActionsOption();
         await this._validateBrowsers();
     }
 
@@ -473,9 +518,107 @@ export default class Runner extends EventEmitter {
         this.bootstrapper.tsConfigPath           = this.configuration.getOption(OPTION_NAMES.tsConfigPath);
         this.bootstrapper.clientScripts          = this.configuration.getOption(OPTION_NAMES.clientScripts) || this.bootstrapper.clientScripts;
         this.bootstrapper.disableMultipleWindows = this.configuration.getOption(OPTION_NAMES.disableMultipleWindows);
-        this.bootstrapper.proxyless              = this.configuration.getOption(OPTION_NAMES.proxyless);
         this.bootstrapper.compilerOptions        = this.configuration.getOption(OPTION_NAMES.compilerOptions);
         this.bootstrapper.browserInitTimeout     = this.configuration.getOption(OPTION_NAMES.browserInitTimeout);
+        this.bootstrapper.hooks                  = this.configuration.getOption(OPTION_NAMES.hooks);
+        this.bootstrapper.configuration          = this.configuration;
+    }
+
+    _resetBeforeRun () {
+        this.apiMethodWasCalled.reset();
+        this._messageBus.clearListeners();
+    }
+
+    _prepareAndRunTask (options) {
+        const messageBusErrorPromise = promisifyEvent(this._messageBus, 'error');
+        const taskOptionsPromise     = this._getRunTaskOptions(options);
+        const bindedTaskRunner       = this._runTask.bind(this);
+        const runTaskPromise         = taskOptionsPromise.then(bindedTaskRunner);
+
+        const promise = Promise.race([
+            runTaskPromise,
+            messageBusErrorPromise,
+        ]);
+
+        return this._createCancelablePromise(promise);
+    }
+
+    async _prepareReporters () {
+        const reporterPlugins = await Reporter.getReporterPlugins(this.configuration.getOption(OPTION_NAMES.reporter));
+        const reporterHooks   = this.configuration.getOption(OPTION_NAMES.hooks)?.reporter;
+
+        if (reporterHooks)
+            this._assertReporterHooks(reporterHooks);
+
+        this._reporters = reporterPlugins.map(reporter => {
+            const reporterOptions = {
+                plugin:              reporter.plugin,
+                messageBus:          this._messageBus,
+                outStream:           reporter.outStream,
+                name:                reporter.name,
+                reporterPluginHooks: this._resolvePluginHooks(reporter.name, reporterHooks),
+            };
+
+            return new Reporter(reporterOptions);
+        });
+
+        await Promise.all(this._reporters.map(reporter => reporter.init()));
+    }
+
+    _resolvePluginHooks (name, reporterHooks) {
+        if (!reporterHooks)
+            return void 0;
+
+        const resultHooks = {};
+
+        if (reporterHooks.onBeforeWrite && reporterHooks.onBeforeWrite[name])
+            resultHooks.onBeforeWrite = reporterHooks.onBeforeWrite[name];
+
+        return resultHooks;
+    }
+
+    _assertReporterHooks (hooks) {
+        if (hooks?.onBeforeWrite) {
+            assertType(is.nonNullObject, 'onBeforeWrite', 'The reporter.onBeforeWrite', hooks.onBeforeWrite);
+
+            Object.entries(hooks?.onBeforeWrite).forEach(([reporterName, hook]) => {
+                assertType(is.function, reporterName, `The reporter.onBeforeWrite.${reporterName}`, hook);
+            });
+        }
+    }
+
+    async _prepareOptions (options) {
+        this._options = Object.assign(this._options, options);
+
+        await this._setConfigurationOptions();
+        await this._prepareReporters();
+        await this._setBootstrapperOptions();
+
+        logEntry(DEBUG_LOGGER, this.configuration);
+
+        await this._validateRunOptions();
+    }
+
+    async _getRunTaskOptions (options) {
+        await this._prepareOptions(options);
+
+        const { browserSet, tests, testedApp, commonClientScripts, id } = await this._createRunnableConfiguration();
+
+        await this._prepareClientScripts(tests, commonClientScripts);
+
+        const resultOptions = {
+            ...this.configuration.getOptions(),
+        };
+
+        return {
+            browserSet,
+            tests,
+            testedApp,
+
+            runnableConfigurationId: id,
+            options:                 resultOptions,
+            reporters:               this._reporters,
+        };
     }
 
     async _prepareClientScripts (tests, clientScripts) {
@@ -511,7 +654,7 @@ export default class Runner extends EventEmitter {
             errors.UnableToAccessScreenRecordingAPIError,
             {
                 interactive: hasLocalBrowsers && !isCI,
-            }
+            },
         );
 
         if (!error)
@@ -534,16 +677,14 @@ export default class Runner extends EventEmitter {
             if (isLocalBrowser && !isHeadlessBrowser) {
                 throw new GeneralError(
                     RUNTIME_ERRORS.cannotRunLocalNonHeadlessBrowserWithoutDisplay,
-                    browserInfo.alias
+                    browserInfo.alias,
                 );
             }
         }
     }
 
-    async _applyOptions () {
+    async _setConfigurationOptions () {
         await this.configuration.asyncMergeOptions(this._options);
-
-        return this._setBootstrapperOptions();
     }
 
     // API
@@ -608,12 +749,13 @@ export default class Runner extends EventEmitter {
     screenshots (...options) {
         let fullPage;
         let thumbnails;
+        let pathPatternOnFails;
         let [path, takeOnFails, pathPattern] = options;
 
         if (options.length === 1 && options[0] && typeof options[0] === 'object')
-            ({ path, takeOnFails, pathPattern, fullPage, thumbnails } = options[0]);
+            ({ path, takeOnFails, pathPattern, pathPatternOnFails, fullPage, thumbnails } = options[0]);
 
-        this._options.screenshots = { path, takeOnFails, pathPattern, fullPage, thumbnails };
+        this._options.screenshots = { path, takeOnFails, pathPattern, pathPatternOnFails, fullPage, thumbnails };
 
         return this;
     }
@@ -656,36 +798,9 @@ export default class Runner extends EventEmitter {
     }
 
     run (options = {}) {
-        let reporters;
+        this._resetBeforeRun();
 
-        this.apiMethodWasCalled.reset();
-        this._messageBus.clearListeners();
-
-        this._options = Object.assign(this._options, options);
-
-        const runTaskPromise = Promise.resolve()
-            .then(() => Reporter.getReporterPlugins(this._options.reporter))
-            .then(reporterPlugins => {
-                reporters = reporterPlugins.map(reporter => new Reporter(reporter.plugin, this._messageBus, reporter.outStream, reporter.name));
-            })
-            .then(() => this._applyOptions())
-            .then(() => {
-                logEntry(DEBUG_LOGGER, this.configuration);
-
-                return this._validateRunOptions();
-            })
-            .then(() => this._createRunnableConfiguration())
-            .then(async ({ browserSet, tests, testedApp, commonClientScripts }) => {
-                await this._prepareClientScripts(tests, commonClientScripts);
-
-                const resultOptions = this.configuration.getOptions();
-
-                await this.bootstrapper.compilerService?.setOptions({ value: resultOptions });
-
-                return this._runTask({ reporters, browserSet, tests, testedApp, options: resultOptions });
-            });
-
-        return this._createCancelablePromise(runTaskPromise);
+        return this._prepareAndRunTask(options);
     }
 
     async stop () {

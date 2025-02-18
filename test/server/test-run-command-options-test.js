@@ -1,15 +1,19 @@
-const expect                   = require('chai').expect;
-const ActionOptions            = require('../../lib/test-run/commands/options').ActionOptions;
-const OffsetOptions            = require('../../lib/test-run/commands/options').OffsetOptions;
-const ScrollOptions            = require('../../lib/test-run/commands/options').ScrollOptions;
-const MouseOptions             = require('../../lib/test-run/commands/options').MouseOptions;
-const DragToElementOptions     = require('../../lib/test-run/commands/options').DragToElementOptions;
-const ClickOptions             = require('../../lib/test-run/commands/options').ClickOptions;
-const MoveOptions              = require('../../lib/test-run/commands/options').MoveOptions;
-const TypeOptions              = require('../../lib/test-run/commands/options').TypeOptions;
-const ElementScreenshotOptions = require('../../lib/test-run/commands/options').ElementScreenshotOptions;
-const ResizeToFitDeviceOptions = require('../../lib/test-run/commands/options').ResizeToFitDeviceOptions;
-const AssertionOptions         = require('../../lib/test-run/commands/options').AssertionOptions;
+const expect = require('chai').expect;
+const {
+    ActionOptions,
+    OffsetOptions,
+    ScrollOptions,
+    MouseOptions,
+    DragToElementOptions,
+    ClickOptions,
+    MoveOptions,
+    TypeOptions,
+    ElementScreenshotOptions,
+    ResizeToFitDeviceOptions,
+    AssertionOptions,
+    CookieOptions,
+    SkipJsErrorsOptions,
+}      = require('../../lib/test-run/commands/options');
 
 // NOTE: chai's throws doesn't perform deep comparison of error objects
 function assertThrow (fn, expectedErr) {
@@ -259,9 +263,90 @@ describe('Test run command options', function () {
                 allowUnawaitedPromise: false,
             });
         });
+
+        it('Should create CookieOptions from object', function () {
+            const options = new CookieOptions({
+                name:     'cookieName',
+                value:    'cookieValue',
+                domain:   'localhost',
+                path:     '/',
+                expires:  'Infinity',
+                maxAge:   'Infinity',
+                secure:   false,
+                httpOnly: true,
+                sameSite: 'none',
+            }, false);
+
+            expect(JSON.parse(JSON.stringify(options))).eql({
+                name:     'cookieName',
+                value:    'cookieValue',
+                domain:   'localhost',
+                path:     '/',
+                expires:  'Infinity',
+                maxAge:   'Infinity',
+                secure:   false,
+                httpOnly: true,
+                sameSite: 'none',
+            });
+        });
     });
 
     describe('Validation', function () {
+        it('Should throw an error if the invalid property is in any object inherited from "Assignable"', function () {
+            assertThrow(
+                function () {
+                    return new ActionOptions({ speed: '1', invalidProp: 'value' }, true);
+                },
+                {
+                    isTestCafeError:     true,
+                    code:                'E100',
+                    objectName:          'ActionOptions',
+                    propertyName:        'invalidProp',
+                    availableProperties: ['speed'],
+                    callsite:            null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new ClickOptions({ invalidProp: 'value' }, true);
+                },
+                {
+                    isTestCafeError:     true,
+                    code:                'E100',
+                    objectName:          'ClickOptions',
+                    propertyName:        'invalidProp',
+                    availableProperties: [
+                        'caretPos',
+                        'isDefaultOffset',
+                        'modifiers',
+                        'offsetX',
+                        'offsetY',
+                        'speed',
+                    ],
+                    callsite: null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new SkipJsErrorsOptions({ message: '1', invalidProp: 'value' }, true);
+                },
+                {
+                    isTestCafeError:     true,
+                    code:                'E100',
+                    objectName:          'SkipJsErrorsOptions',
+                    propertyName:        'invalidProp',
+                    availableProperties: [
+                        'message',
+                        'pageUrl',
+                        'stack',
+                    ],
+                    callsite: null,
+                }
+            );
+        });
+
         it('Should validate ActionOptions', function () {
             assertThrow(
                 function () {
@@ -271,7 +356,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E12',
                     actualValue:     'string',
-                    optionName:      'speed',
+                    optionName:      'ActionOptions.speed',
                     callsite:        null,
                 }
             );
@@ -284,7 +369,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E12',
                     actualValue:     5,
-                    optionName:      'speed',
+                    optionName:      'ActionOptions.speed',
                     callsite:        null,
                 }
             );
@@ -297,7 +382,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E12',
                     actualValue:     0,
-                    optionName:      'speed',
+                    optionName:      'ActionOptions.speed',
                     callsite:        null,
                 }
             );
@@ -312,7 +397,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E9',
                     actualValue:     'object',
-                    optionName:      'offsetX',
+                    optionName:      'OffsetOptions.offsetX',
                     callsite:        null,
                 }
             );
@@ -325,7 +410,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E9',
                     actualValue:     NaN,
-                    optionName:      'offsetX',
+                    optionName:      'OffsetOptions.offsetX',
                     callsite:        null,
                 }
             );
@@ -338,7 +423,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E9',
                     actualValue:     3.14,
-                    optionName:      'offsetX',
+                    optionName:      'OffsetOptions.offsetX',
                     callsite:        null,
                 }
             );
@@ -353,7 +438,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E11',
                     actualValue:     'number',
-                    optionName:      'modifiers.ctrl',
+                    optionName:      'ModifiersOptions.ctrl',
                     callsite:        null,
                 }
             );
@@ -366,7 +451,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E11',
                     actualValue:     'number',
-                    optionName:      'modifiers.alt',
+                    optionName:      'ModifiersOptions.alt',
                     callsite:        null,
                 }
             );
@@ -379,7 +464,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E11',
                     actualValue:     'number',
-                    optionName:      'modifiers.shift',
+                    optionName:      'ModifiersOptions.shift',
                     callsite:        null,
                 }
             );
@@ -392,7 +477,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E11',
                     actualValue:     'number',
-                    optionName:      'modifiers.meta',
+                    optionName:      'ModifiersOptions.meta',
                     callsite:        null,
                 }
             );
@@ -407,7 +492,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E10',
                     actualValue:     -1,
-                    optionName:      'caretPos',
+                    optionName:      'ClickOptions.caretPos',
                     callsite:        null,
                 }
             );
@@ -420,7 +505,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E10',
                     actualValue:     3.14,
-                    optionName:      'caretPos',
+                    optionName:      'ClickOptions.caretPos',
                     callsite:        null,
                 }
             );
@@ -435,7 +520,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E11',
                     actualValue:     'number',
-                    optionName:      'replace',
+                    optionName:      'TypeOptions.replace',
                     callsite:        null,
                 }
             );
@@ -450,7 +535,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E9',
                     actualValue:     'object',
-                    optionName:      'destinationOffsetX',
+                    optionName:      'DragToElementOptions.destinationOffsetX',
                     callsite:        null,
                 }
             );
@@ -463,7 +548,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E9',
                     actualValue:     NaN,
-                    optionName:      'destinationOffsetY',
+                    optionName:      'DragToElementOptions.destinationOffsetY',
                     callsite:        null,
                 }
             );
@@ -478,7 +563,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E11',
                     actualValue:     'number',
-                    optionName:      'portraitOrientation',
+                    optionName:      'ResizeToFitDeviceOptions.portraitOrientation',
                     callsite:        null,
                 }
             );
@@ -493,7 +578,7 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E10',
                     actualValue:     -1,
-                    optionName:      'timeout',
+                    optionName:      'AssertionOptions.timeout',
                     callsite:        null,
                 }
             );
@@ -506,7 +591,126 @@ describe('Test run command options', function () {
                     isTestCafeError: true,
                     code:            'E10',
                     actualValue:     'string',
-                    optionName:      'timeout',
+                    optionName:      'AssertionOptions.timeout',
+                    callsite:        null,
+                }
+            );
+        });
+
+        it('Should validate CookieOptions', function () {
+            assertThrow(
+                function () {
+                    return new CookieOptions({ name: false }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E90',
+                    actualValue:     'boolean',
+                    optionName:      'CookieOptions.name',
+                    callsite:        null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new CookieOptions({ value: {} }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E90',
+                    actualValue:     'object',
+                    optionName:      'CookieOptions.value',
+                    callsite:        null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new CookieOptions({ domain: 213 }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E90',
+                    actualValue:     'number',
+                    optionName:      'CookieOptions.domain',
+                    callsite:        null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new CookieOptions({ path: true }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E90',
+                    actualValue:     'boolean',
+                    optionName:      'CookieOptions.path',
+                    callsite:        null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new CookieOptions({ expires: -Infinity }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E91',
+                    actualValue:     -Infinity,
+                    optionName:      'CookieOptions.expires',
+                    callsite:        null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new CookieOptions({ maxAge: 'age' }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E92',
+                    actualValue:     'string',
+                    optionName:      'CookieOptions.maxAge',
+                    callsite:        null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new CookieOptions({ secure: 0 }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E11',
+                    actualValue:     'number',
+                    optionName:      'CookieOptions.secure',
+                    callsite:        null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new CookieOptions({ httpOnly: 'str' }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E11',
+                    actualValue:     'string',
+                    optionName:      'CookieOptions.httpOnly',
+                    callsite:        null,
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return new CookieOptions({ sameSite: {} }, true);
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E90',
+                    actualValue:     'object',
+                    optionName:      'CookieOptions.sameSite',
                     callsite:        null,
                 }
             );

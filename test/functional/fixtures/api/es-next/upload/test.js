@@ -7,6 +7,14 @@ describe('[API] Upload', function () {
             return runTests('./testcafe-fixtures/upload-test.js', 'Upload the file', { only: 'chrome' });
         });
 
+        it('Should upload the specified xls file', function () {
+            return runTests('./testcafe-fixtures/upload-test.js', 'Upload the xls file', { only: 'chrome' });
+        });
+
+        it('Should upload the specified file with required input', function () {
+            return runTests('./testcafe-fixtures/upload-test.js', 'Upload the file with required input', { only: 'chrome' });
+        });
+
         it('Should validate the selector argument', function () {
             return runTests('./testcafe-fixtures/upload-test.js', 'Invalid selector argument (setFilesToUpload)', {
                 shouldFail: true,
@@ -51,6 +59,10 @@ describe('[API] Upload', function () {
                     expect(errs[0]).contains(scannedFilePath1);
                     expect(errs[0]).contains(scannedFilePath2);
                 });
+        });
+
+        it('Should have a valid value for the "input.value" property (GH-7832)', () => {
+            return runTests('./testcafe-fixtures/7832.js');
         });
     });
 

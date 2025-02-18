@@ -1,6 +1,7 @@
 import { Writable as WritableStream } from 'stream';
 
 export interface ReporterPlugin {
+    init(): void;
     reportTaskStart(): void;
     reportFixtureStart(): void;
     reportTestStart?(): void;
@@ -9,11 +10,13 @@ export interface ReporterPlugin {
     reportTestDone(): void;
     reportTaskDone(): void;
     reportWarnings?(): void;
+    reportData? (): void
 }
 
 export interface ReporterSource {
     name: string;
     output?: string | WritableStream;
+    options?: Record<string, any>;
 }
 
 export interface ReporterPluginSource {
@@ -23,5 +26,11 @@ export interface ReporterPluginSource {
 }
 
 export interface ReporterPluginFactory {
-    (): ReporterPlugin;
+    (options?: Record<string, any>): ReporterPlugin;
 }
+
+export interface ReporterSymbols {
+    ok: string;
+    err: string;
+}
+

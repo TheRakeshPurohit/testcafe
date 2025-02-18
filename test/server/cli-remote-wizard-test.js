@@ -3,6 +3,8 @@ const { expect }             = require('chai');
 const proxyquire             = require('proxyquire');
 const sinon                  = require('sinon');
 const { constructor: Chalk } = require('chalk');
+const { noop }               = require('lodash');
+const { configurationMock }  = require('./helpers/mocks');
 
 
 describe('[CLI] Remote wizard', () => {
@@ -17,6 +19,10 @@ describe('[CLI] Remote wizard', () => {
             browserConnectionGateway: {
                 connectUrl: 'http://example.com',
             },
+
+            initializeBrowserConnectionGateway: noop,
+
+            configuration: configurationMock,
 
             createBrowserConnection: () => {
                 const connection = new EventEmitter();

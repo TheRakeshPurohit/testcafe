@@ -8,6 +8,10 @@ import delay from '../utils/delay';
 const DEBUG_LOGGER_PREFIX = 'testcafe:video-recorder:process:';
 
 const DEFAULT_OPTIONS = {
+
+    // NOTE: use to force stdin and stdout formats
+    'f': 'image2pipe',
+
     // NOTE: don't ask confirmation for rewriting the output file
     'y': true,
 
@@ -35,6 +39,8 @@ const DEFAULT_OPTIONS = {
 };
 
 const FFMPEG_START_DELAY = 500;
+
+const DELAY_AFTER_EMPTY_FRAME = 20;
 
 export default class VideoRecorder extends AsyncEmitter {
     constructor (basePath, ffmpegPath, connection, customOptions) {
@@ -115,11 +121,21 @@ export default class VideoRecorder extends AsyncEmitter {
                     await this.emit('frame');
                     await this._addFrame(frame);
                 }
+                else
+                    await delay(DELAY_AFTER_EMPTY_FRAME);
             }
             catch (error) {
                 this.debugLogger(error);
             }
         }
+    }
+
+    async _startCapturing () {
+        await this.connection.provider.startCapturingVideo(this.connection.id);
+    }
+
+    async _stopCapturing () {
+        await this.connection.provider.stopCapturingVideo(this.connection.id);
     }
 
     async init () {
@@ -162,6 +178,8 @@ export default class VideoRecorder extends AsyncEmitter {
     }
 
     async startCapturing () {
+        await this._startCapturing();
+
         this.capturingPromise = this._capture();
 
         await this.once('frame');
@@ -173,6 +191,7 @@ export default class VideoRecorder extends AsyncEmitter {
 
         this.closed = true;
 
+        await this._stopCapturing();
         await this.capturingPromise;
         await this.dispose();
     }

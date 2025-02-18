@@ -1,6 +1,7 @@
 import { Transform } from 'replicator';
-import adapter from '../../adapter/index';
 import { DomNodeClientFunctionResultError } from '../../../../../../shared/errors/index';
+// @ts-ignore
+import { nativeMethods } from '../../../../deps/hammerhead';
 
 export default class ClientFunctionNodeTransform implements Transform {
     public readonly type = 'Node';
@@ -11,15 +12,15 @@ export default class ClientFunctionNodeTransform implements Transform {
     }
 
     public shouldTransform (type: string, val: unknown): boolean {
-        if (val instanceof adapter.nativeMethods.Node)
+        if (val instanceof nativeMethods.Node)
             throw new DomNodeClientFunctionResultError(this._instantiationCallsiteName);
 
         return false;
     }
 
-    public toSerializable (): void {
+    public toSerializable (): void { // eslint-disable-line @typescript-eslint/no-empty-function
     }
 
-    public fromSerializable (): void {
+    public fromSerializable (): void { // eslint-disable-line @typescript-eslint/no-empty-function
     }
 }

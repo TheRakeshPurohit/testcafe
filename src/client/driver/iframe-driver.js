@@ -10,18 +10,23 @@ import Driver from './driver';
 import ContextStorage from './storage';
 import DriverStatus from './status';
 import ParentIframeDriverLink from './driver-link/iframe/parent';
-import { ChildWindowIsOpenedInFrameMessage, TYPE as MESSAGE_TYPE } from './driver-link/messages';
 import IframeNativeDialogTracker from './native-dialog-tracker/iframe';
 
+import {
+    ChildWindowIsOpenedInFrameMessage,
+    StopInternalFromFrameMessage,
+    TYPE as MESSAGE_TYPE,
+} from './driver-link/messages';
 
 const messageSandbox = eventSandbox.message;
 
 export default class IframeDriver extends Driver {
-    constructor (testRunId, options) {
-        super(testRunId, {}, {}, options);
+    constructor (testRunId, communicationsUrls, options) {
+        super(testRunId, communicationsUrls, {}, options);
 
         this.lastParentDriverMessageId = null;
         this.parentDriverLink          = new ParentIframeDriverLink(window.parent);
+
         this._initParentDriverListening();
     }
 
@@ -34,10 +39,21 @@ export default class IframeDriver extends Driver {
         // NOTE: do nothing because hammerhead sends console messages to the top window directly
     }
 
-    // NOTE: when the new page is opened in the iframe we send a message to the top window
-    // to start waiting for the new page is loaded
-    _onChildWindowOpened () {
+    async _onChildWindowOpened (e) {
+        if (this.options.nativeAutomation) {
+            const windowId = await this._ensureNewWindowOpenedInNativeAutomation(e);
+
+            if (!windowId)
+                return;
+        }
+
+        // NOTE: when the new page is opened in the iframe we send a message to the top window
+        // to start waiting for the new page is loaded
         messageSandbox.sendServiceMsg(new ChildWindowIsOpenedInFrameMessage(), window.top);
+    }
+
+    _stopInternal () {
+        messageSandbox.sendServiceMsg(new StopInternalFromFrameMessage(), window.top);
     }
 
     // Messaging between drivers
@@ -92,9 +108,16 @@ export default class IframeDriver extends Driver {
     }
 
     async _init () {
-        const id = await this.parentDriverLink.establishConnection();
+        const { id, dispatchNativeAutomationEventUrls } = await this.parentDriverLink.establishConnection();
 
-        this.contextStorage = new ContextStorage(window, id, this.windowId);
+        this.contextStorage = new ContextStorage(window, {
+            testRunId:        id,
+            windowId:         this.windowId,
+            nativeAutomation: this.options.nativeAutomation,
+        });
+
+        this.communicationUrls.dispatchNativeAutomationEvent         = dispatchNativeAutomationEventUrls.single;
+        this.communicationUrls.dispatchNativeAutomationEventSequence = dispatchNativeAutomationEventUrls.sequence;
 
         if (this._failIfClientCodeExecutionIsInterrupted())
             return;
@@ -112,10 +135,14 @@ export default class IframeDriver extends Driver {
 
     // API
     start () {
-        this.nativeDialogsTracker = new IframeNativeDialogTracker(this.dialogHandler);
-        this.statusBar            = new IframeStatusBar();
+        this.nativeDialogsTracker = new IframeNativeDialogTracker({
+            dialogHandler:    this.options.dialogHandler,
+            nativeAutomation: this.options.nativeAutomation,
+        });
 
-        const initializePromise   = this._init();
+        this.statusBar = new IframeStatusBar();
+
+        const initializePromise = this._init();
 
         this.readyPromise = Promise.all([this.readyPromise, initializePromise]);
     }

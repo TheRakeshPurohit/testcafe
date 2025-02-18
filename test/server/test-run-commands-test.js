@@ -5,6 +5,7 @@ const SelectorBuilder         = require('../../lib/client-functions/selectors/se
 const assertThrow             = require('./helpers/assert-runtime-error').assertThrow;
 const TestController          = require('../../lib/api/test-controller');
 const path                    = require('path');
+const semver                  = require('semver');
 
 const testRunMock = {
     test: {
@@ -16,9 +17,36 @@ const testRunMock = {
 
 testRunMock.controller = new TestController(testRunMock);
 
+const CHILD_SELECTOR_PROPERTY_NAMES = [
+    'selector',
+    'startSelector',
+    'endSelector',
+    'destinationSelector',
+];
+
+function ensureActionId (command, { type }) {
+    if (!command.actionId)
+        throw new Error('command does not have action id');
+
+    command.actionId = type;
+
+    for (const selectorProperty of CHILD_SELECTOR_PROPERTY_NAMES) {
+        if (command[selectorProperty]) {
+            if (!command[selectorProperty].actionId)
+                throw new Error('nested command does not have action id');
+
+            command[selectorProperty].actionId = 'child-command-selector';
+        }
+    }
+}
+
 function createCommand (obj) {
     try {
-        return createCommandFromObject(obj, testRunMock);
+        const command = createCommandFromObject(obj, testRunMock);
+
+        ensureActionId(command, obj);
+
+        return command;
     }
     catch (e) {
         // TODO: add an assertion for APIError
@@ -42,9 +70,14 @@ function assertErrorMessage (fn, expectedErrMessage) {
     expect(actualErr.message).eql(expectedErrMessage);
 }
 
-function makeSelector (str, skipVisibilityCheck) {
-    const builder = new SelectorBuilder(str, { visibilityCheck: !skipVisibilityCheck }, { instantiation: 'Selector' });
-    const command = builder.getCommand([]);
+function makeSelector (str, skipVisibilityCheck, needError, strictError) {
+    const builder = new SelectorBuilder(str, {
+        visibilityCheck: !skipVisibilityCheck,
+        needError, strictError,
+    }, { instantiation: 'Selector' });
+    const command = builder.getCommand();
+
+    command.actionId = 'child-command-selector';
 
     return JSON.parse(JSON.stringify(command));
 }
@@ -55,19 +88,16 @@ describe('Test run commands', () => {
             let commandObj = {
                 type:     TYPE.click,
                 selector: '#yo',
-                yo:       'test',
 
                 options: {
                     offsetX:  23,
                     offsetY:  32,
                     caretPos: 2,
                     speed:    0.5,
-                    dummy:    'yo',
 
                     modifiers: {
                         ctrl:  true,
                         shift: true,
-                        dummy: 'yo',
                         alt:   true,
                         meta:  true,
                     },
@@ -78,6 +108,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.click,
+                actionId: TYPE.click,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -104,6 +135,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.click,
+                actionId: TYPE.click,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -126,19 +158,16 @@ describe('Test run commands', () => {
             let commandObj = {
                 type:     TYPE.rightClick,
                 selector: '#yo',
-                yo:       'test',
 
                 options: {
                     offsetX:  23,
                     offsetY:  32,
                     caretPos: 2,
                     speed:    0.5,
-                    dummy:    'yo',
 
                     modifiers: {
                         ctrl:  true,
                         shift: false,
-                        dummy: 'yo',
                         alt:   true,
                         meta:  false,
                     },
@@ -149,6 +178,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.rightClick,
+                actionId: TYPE.rightClick,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -175,6 +205,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.rightClick,
+                actionId: TYPE.rightClick,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -197,19 +228,16 @@ describe('Test run commands', () => {
             let commandObj = {
                 type:     TYPE.doubleClick,
                 selector: '#yo',
-                yo:       'test',
 
                 options: {
                     offsetX:  23,
                     offsetY:  32,
                     caretPos: 2,
                     speed:    0.5,
-                    dummy:    'yo',
 
                     modifiers: {
                         ctrl:  true,
                         shift: false,
-                        dummy: 'yo',
                         alt:   true,
                         meta:  false,
                     },
@@ -220,6 +248,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.doubleClick,
+                actionId: TYPE.doubleClick,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -246,6 +275,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.doubleClick,
+                actionId: TYPE.doubleClick,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -268,19 +298,15 @@ describe('Test run commands', () => {
             let commandObj = {
                 type:     TYPE.hover,
                 selector: '#yo',
-                yo:       'test',
 
                 options: {
-                    offsetX:  23,
-                    offsetY:  32,
-                    caretPos: 2,
-                    speed:    0.5,
-                    dummy:    'yo',
+                    offsetX: 23,
+                    offsetY: 32,
+                    speed:   0.5,
 
                     modifiers: {
                         ctrl:  true,
                         shift: false,
-                        dummy: 'yo',
                         alt:   true,
                         meta:  false,
                     },
@@ -291,6 +317,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.hover,
+                actionId: TYPE.hover,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -316,6 +343,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.hover,
+                actionId: TYPE.hover,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -339,19 +367,15 @@ describe('Test run commands', () => {
                 selector:    '#yo',
                 dragOffsetX: 10,
                 dragOffsetY: -15,
-                dummy:       false,
 
                 options: {
-                    offsetX:  23,
-                    offsetY:  32,
-                    caretPos: 2,
-                    speed:    0.5,
-                    dummy:    1,
+                    offsetX: 23,
+                    offsetY: 32,
+                    speed:   0.5,
 
                     modifiers: {
                         ctrl:  true,
                         shift: false,
-                        dummy: 'yo',
                         alt:   true,
                         meta:  false,
                     },
@@ -362,6 +386,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:        TYPE.drag,
+                actionId:    TYPE.drag,
                 selector:    makeSelector('#yo'),
                 dragOffsetX: 10,
                 dragOffsetY: -15,
@@ -391,6 +416,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:        TYPE.drag,
+                actionId:    TYPE.drag,
                 selector:    makeSelector('#yo'),
                 dragOffsetX: 10,
                 dragOffsetY: -15,
@@ -415,21 +441,17 @@ describe('Test run commands', () => {
                 type:                TYPE.dragToElement,
                 selector:            '#yo',
                 destinationSelector: '#destination',
-                dragOffsetX:         10,
 
                 options: {
                     offsetX:            23,
                     offsetY:            32,
                     destinationOffsetX: 12,
                     destinationOffsetY: 21,
-                    caretPos:           2,
                     speed:              0.5,
-                    dummy:              1,
 
                     modifiers: {
                         ctrl:  true,
                         shift: false,
-                        dummy: 'yo',
                         alt:   true,
                         meta:  false,
                     },
@@ -440,6 +462,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:                TYPE.dragToElement,
+                actionId:            TYPE.dragToElement,
                 selector:            makeSelector('#yo'),
                 destinationSelector: makeSelector('#destination'),
 
@@ -469,7 +492,9 @@ describe('Test run commands', () => {
             command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:                TYPE.dragToElement,
+                type:     TYPE.dragToElement,
+                actionId: TYPE.dragToElement,
+
                 selector:            makeSelector('#yo'),
                 destinationSelector: makeSelector('#destination'),
 
@@ -495,21 +520,18 @@ describe('Test run commands', () => {
                 type:     TYPE.typeText,
                 selector: '#yo',
                 text:     'testText',
-                yo:       'test',
 
                 options: {
                     offsetX:  23,
                     offsetY:  32,
                     caretPos: 2,
                     speed:    0.5,
-                    dummy:    'yo',
                     replace:  true,
                     paste:    true,
 
                     modifiers: {
                         ctrl:  true,
                         shift: false,
-                        dummy: 'yo',
                         alt:   false,
                         meta:  false,
                     },
@@ -522,7 +544,8 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.typeText,
-                selector: makeSelector('#yo'),
+                actionId: TYPE.typeText,
+                selector: makeSelector('#yo', false, true, true),
                 text:     'testText',
 
                 options: {
@@ -554,7 +577,8 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.typeText,
-                selector: makeSelector('#yo'),
+                actionId: TYPE.typeText,
+                selector: makeSelector('#yo', false, true, true),
                 text:     'testText',
 
                 options: {
@@ -581,12 +605,9 @@ describe('Test run commands', () => {
                 selector: '#yo',
                 startPos: 1,
                 endPos:   2,
-                yo:       'test',
 
                 options: {
-                    offsetX: 23,
-                    dummy:   'yo',
-                    speed:   0.5,
+                    speed: 0.5,
                 },
             };
 
@@ -594,6 +615,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.selectText,
+                actionId: TYPE.selectText,
                 selector: makeSelector('#yo'),
                 startPos: 1,
                 endPos:   2,
@@ -612,6 +634,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.selectText,
+                actionId: TYPE.selectText,
                 selector: makeSelector('#yo'),
                 startPos: null,
                 endPos:   null,
@@ -630,12 +653,9 @@ describe('Test run commands', () => {
                 startPos:  1,
                 endLine:   2,
                 endPos:    3,
-                yo:        5,
 
                 options: {
-                    offsetX: 23,
-                    dummy:   'yo',
-                    speed:   0.5,
+                    speed: 0.5,
                 },
             };
 
@@ -643,6 +663,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:      TYPE.selectTextAreaContent,
+                actionId:  TYPE.selectTextAreaContent,
                 selector:  makeSelector('#yo'),
                 startLine: 0,
                 startPos:  1,
@@ -663,6 +684,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:      TYPE.selectTextAreaContent,
+                actionId:  TYPE.selectTextAreaContent,
                 selector:  makeSelector('#yo'),
                 startLine: null,
                 startPos:  null,
@@ -678,15 +700,11 @@ describe('Test run commands', () => {
         it('Should create SelectEditableContentCommand from object', () => {
             let commandObj = {
                 type:          TYPE.selectEditableContent,
-                selector:      '#yo',
                 startSelector: '#node1',
                 endSelector:   '#node2',
-                yo:            'test',
 
                 options: {
-                    offsetX: 23,
-                    dummy:   'yo',
-                    speed:   0.5,
+                    speed: 0.5,
                 },
             };
 
@@ -694,6 +712,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:          TYPE.selectEditableContent,
+                actionId:      TYPE.selectEditableContent,
                 startSelector: makeSelector('#node1'),
                 endSelector:   makeSelector('#node2'),
 
@@ -704,7 +723,6 @@ describe('Test run commands', () => {
 
             commandObj = {
                 type:          TYPE.selectEditableContent,
-                selector:      '#yo',
                 startSelector: '#node1',
             };
 
@@ -712,6 +730,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:          TYPE.selectEditableContent,
+                actionId:      TYPE.selectEditableContent,
                 startSelector: makeSelector('#node1'),
                 endSelector:   null,
 
@@ -723,32 +742,20 @@ describe('Test run commands', () => {
 
         it('Should create PressKeyCommand from object', () => {
             const commandObj = {
-                type:     TYPE.pressKey,
-                selector: '#yo',
-                keys:     'a+b c',
-                yo:       'test',
+                type: TYPE.pressKey,
+                keys: 'a+b c',
 
                 options: {
-                    offsetX: 23,
-                    offsetY: 32,
-                    dummy:   'yo',
-                    speed:   0.5,
-
-                    modifiers: {
-                        ctrl:  true,
-                        shift: false,
-                        dummy: 'yo',
-                        alt:   false,
-                        meta:  false,
-                    },
+                    speed: 0.5,
                 },
             };
 
             const command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type: TYPE.pressKey,
-                keys: 'a+b c',
+                type:     TYPE.pressKey,
+                actionId: TYPE.pressKey,
+                keys:     'a+b c',
 
                 options: {
                     speed: 0.5,
@@ -764,8 +771,9 @@ describe('Test run commands', () => {
             const command    = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:    TYPE.wait,
-                timeout: 1000,
+                type:     TYPE.wait,
+                actionId: TYPE.wait,
+                timeout:  1000,
             });
         });
 
@@ -781,6 +789,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:          TYPE.navigateTo,
+                actionId:      TYPE.navigateTo,
                 url:           'localhost',
                 stateSnapshot: 'stateSnapshot',
                 forceReload:   true,
@@ -792,17 +801,13 @@ describe('Test run commands', () => {
                 type:     TYPE.setFilesToUpload,
                 selector: '#yo',
                 filePath: '/test/path',
-                dummy:    'test',
-
-                options: {
-                    dummy: 'yo',
-                },
             };
 
             let command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.setFilesToUpload,
+                actionId: TYPE.setFilesToUpload,
                 selector: makeSelector('#yo', true),
                 filePath: '/test/path',
             });
@@ -811,17 +816,13 @@ describe('Test run commands', () => {
                 type:     TYPE.setFilesToUpload,
                 selector: '#yo',
                 filePath: ['/test/path/1', '/test/path/2'],
-                dummy:    'test',
-
-                options: {
-                    dummy: 'yo',
-                },
             };
 
             command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.setFilesToUpload,
+                actionId: TYPE.setFilesToUpload,
                 selector: makeSelector('#yo', true),
                 filePath: ['/test/path/1', '/test/path/2'],
             });
@@ -831,17 +832,13 @@ describe('Test run commands', () => {
             const commandObj = {
                 type:     TYPE.clearUpload,
                 selector: '#yo',
-                dummy:    'test',
-
-                options: {
-                    dummy: 'yo',
-                },
             };
 
             const command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.clearUpload,
+                actionId: TYPE.clearUpload,
                 selector: makeSelector('#yo', true),
             });
         });
@@ -849,44 +846,54 @@ describe('Test run commands', () => {
         it('Should create TakeScreenshotCommand from object', function () {
             let commandObj = {
                 type:     TYPE.takeScreenshot,
-                selector: '#yo',
                 path:     'custom',
-                dummy:    'test',
                 fullPage: true,
-
-                options: {
-                    dummy: 'yo',
-                },
             };
 
             let command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:     TYPE.takeScreenshot,
-                markData: '',
-                markSeed: null,
-                path:     'custom',
-                fullPage: true,
+                type:        TYPE.takeScreenshot,
+                actionId:    TYPE.takeScreenshot,
+                markData:    '',
+                markSeed:    null,
+                path:        'custom',
+                fullPage:    true,
+                pathPattern: '',
             });
 
             commandObj = {
                 type:     TYPE.takeScreenshot,
-                selector: '#yo',
-                dummy:    'test',
                 fullPage: void 0,
-
-                options: {
-                    dummy: 'yo',
-                },
             };
 
             command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:     TYPE.takeScreenshot,
-                markData: '',
-                markSeed: null,
-                path:     '',
+                type:        TYPE.takeScreenshot,
+                actionId:    TYPE.takeScreenshot,
+                markData:    '',
+                markSeed:    null,
+                path:        '',
+                pathPattern: '',
+            });
+
+            commandObj = {
+                type:        TYPE.takeScreenshot,
+                fullPage:    true,
+                pathPattern: 'custom',
+            };
+
+            command = createCommand(commandObj);
+
+            expect(JSON.parse(JSON.stringify(command))).eql({
+                type:        TYPE.takeScreenshot,
+                actionId:    TYPE.takeScreenshot,
+                fullPage:    true,
+                markData:    '',
+                markSeed:    null,
+                path:        '',
+                pathPattern: 'custom',
             });
         });
 
@@ -895,16 +902,11 @@ describe('Test run commands', () => {
                 type:     TYPE.takeElementScreenshot,
                 selector: '#yo',
                 path:     'custom',
-                dummy:    'test',
 
                 options: {
                     crop: {
                         left: 50,
                         top:  13,
-                    },
-
-                    modifiers: {
-                        alt: true,
                     },
                 },
             };
@@ -913,6 +915,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.takeElementScreenshot,
+                actionId: TYPE.takeElementScreenshot,
                 markData: '',
                 markSeed: null,
                 selector: makeSelector('#yo'),
@@ -939,35 +942,27 @@ describe('Test run commands', () => {
 
         it('Should create ResizeWindowCommand from object', function () {
             const commandObj = {
-                type:     TYPE.resizeWindow,
-                selector: '#yo',
-                dummy:    'test',
-                width:    100,
-                height:   100,
-
-                options: {
-                    dummy: 'yo',
-                },
+                type:   TYPE.resizeWindow,
+                width:  100,
+                height: 100,
             };
 
             const command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:   TYPE.resizeWindow,
-                width:  100,
-                height: 100,
+                type:     TYPE.resizeWindow,
+                actionId: TYPE.resizeWindow,
+                width:    100,
+                height:   100,
             });
         });
 
         it('Should create ResizeWindowToFitDeviceCommand from object', function () {
             let commandObj = {
-                type:     TYPE.resizeWindowToFitDevice,
-                selector: '#yo',
-                dummy:    'test',
-                device:   'iPhone',
+                type:   TYPE.resizeWindowToFitDevice,
+                device: 'iPhone',
 
                 options: {
-                    dummy:               'yo',
                     portraitOrientation: true,
                 },
             };
@@ -975,9 +970,10 @@ describe('Test run commands', () => {
             let command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:    TYPE.resizeWindowToFitDevice,
-                device:  'iPhone',
-                options: { portraitOrientation: true },
+                type:     TYPE.resizeWindowToFitDevice,
+                actionId: TYPE.resizeWindowToFitDevice,
+                device:   'iPhone',
+                options:  { portraitOrientation: true },
             });
 
             commandObj = {
@@ -988,9 +984,10 @@ describe('Test run commands', () => {
             command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:    TYPE.resizeWindowToFitDevice,
-                device:  'iPhone',
-                options: { portraitOrientation: false },
+                type:     TYPE.resizeWindowToFitDevice,
+                actionId: TYPE.resizeWindowToFitDevice,
+                device:   'iPhone',
+                options:  { portraitOrientation: false },
             });
         });
 
@@ -1003,6 +1000,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.switchToIframe,
+                actionId: TYPE.switchToIframe,
                 selector: makeSelector('#iframe'),
             });
         });
@@ -1014,7 +1012,8 @@ describe('Test run commands', () => {
             const command    = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type: TYPE.switchToMainWindow,
+                type:     TYPE.switchToMainWindow,
+                actionId: TYPE.switchToMainWindow,
             });
         });
 
@@ -1026,8 +1025,9 @@ describe('Test run commands', () => {
             const command    = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:  TYPE.setTestSpeed,
-                speed: 0.5,
+                type:     TYPE.setTestSpeed,
+                actionId: TYPE.setTestSpeed,
+                speed:    0.5,
             });
         });
 
@@ -1040,6 +1040,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.setPageLoadTimeout,
+                actionId: TYPE.setPageLoadTimeout,
                 duration: 3,
             });
         });
@@ -1051,11 +1052,9 @@ describe('Test run commands', () => {
                 actual:        1,
                 expected:      0.2,
                 expected2:     3.5,
-                yo:            'test',
                 message:       'ok',
 
                 options: {
-                    offsetX: 23,
                     timeout: 100,
                 },
             };
@@ -1064,6 +1063,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:          TYPE.assertion,
+                actionId:      TYPE.assertion,
                 assertionType: 'eql',
                 actual:        1,
                 expected:      0.2,
@@ -1086,6 +1086,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:          TYPE.assertion,
+                actionId:      TYPE.assertion,
                 assertionType: 'ok',
                 actual:        1,
                 message:       null,
@@ -1107,7 +1108,8 @@ describe('Test run commands', () => {
             let command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type: TYPE.executeExpression,
+                type:     TYPE.executeExpression,
+                actionId: TYPE.executeExpression,
 
                 expression:         'js-expression',
                 resultVariableName: 'variable',
@@ -1121,7 +1123,8 @@ describe('Test run commands', () => {
             command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type: TYPE.executeExpression,
+                type:     TYPE.executeExpression,
+                actionId: TYPE.executeExpression,
 
                 expression:         'js-expression',
                 resultVariableName: null,
@@ -1133,7 +1136,7 @@ describe('Test run commands', () => {
                 type:     TYPE.click,
                 selector: {
                     type:  'js-expr',
-                    value: "Selector('#yo')",
+                    value: 'Selector(\'#yo\')',
                 },
             };
 
@@ -1141,6 +1144,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:     TYPE.click,
+                actionId: TYPE.click,
                 selector: makeSelector('#yo'),
 
                 options: {
@@ -1176,6 +1180,7 @@ describe('Test run commands', () => {
 
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:          TYPE.assertion,
+                actionId:      TYPE.assertion,
                 assertionType: 'eql',
                 actual:        3,
                 expected:      1,
@@ -1191,17 +1196,14 @@ describe('Test run commands', () => {
             let commandObj = {
                 type:    TYPE.recorder,
                 subtype: 'test',
-
-                options: {
-                    dummy: 'yo',
-                },
             };
 
             let command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:    TYPE.recorder,
-                subtype: 'test',
+                type:     TYPE.recorder,
+                actionId: TYPE.recorder,
+                subtype:  'test',
 
                 forceExecutionInTopWindowOnly: false,
             });
@@ -1211,19 +1213,114 @@ describe('Test run commands', () => {
                 subtype: 'test',
 
                 forceExecutionInTopWindowOnly: true,
-
-                options: {
-                    dummy: 'yo',
-                },
             };
 
             command = createCommand(commandObj);
 
             expect(JSON.parse(JSON.stringify(command))).eql({
-                type:    TYPE.recorder,
-                subtype: 'test',
+                type:     TYPE.recorder,
+                actionId: TYPE.recorder,
+                subtype:  'test',
 
                 forceExecutionInTopWindowOnly: true,
+            });
+        });
+
+        it('Should create GetCookiesCommand from object', () => {
+            const commandObj = {
+                type: TYPE.getCookies,
+                urls: ['http://localhost/'],
+
+                cookies: [{
+                    'name': 'apiCookie1',
+                }],
+            };
+
+            const command = createCommand(commandObj);
+
+            expect(JSON.parse(JSON.stringify(command))).eql({
+                type:     TYPE.getCookies,
+                actionId: TYPE.getCookies,
+                urls:     ['http://localhost/'],
+
+                cookies: [{
+                    'name': 'apiCookie1',
+                }],
+            });
+        });
+
+        it('Should create SetCookiesCommand from object', () => {
+            const commandObj = {
+                type: TYPE.setCookies,
+                url:  [],
+
+                cookies: [{
+                    name:   'apiCookie13',
+                    value:  'value13',
+                    domain: 'some-another-domain.com',
+                    path:   '/',
+                }],
+            };
+
+            const command = createCommand(commandObj);
+
+            expect(JSON.parse(JSON.stringify(command))).eql({
+                type:     TYPE.setCookies,
+                actionId: TYPE.setCookies,
+                url:      [],
+
+                cookies: [{
+                    name:   'apiCookie13',
+                    value:  'value13',
+                    domain: 'some-another-domain.com',
+                    path:   '/',
+                }],
+            });
+        });
+
+        it('Should create DeleteCookiesCommand from object', () => {
+            const commandObj = {
+                type: TYPE.deleteCookies,
+                urls: ['http://localhost/'],
+
+                cookies: [{
+                    name: 'apiCookie13',
+                }],
+            };
+
+            const command = createCommand(commandObj);
+
+            expect(JSON.parse(JSON.stringify(command))).eql({
+                type:     TYPE.deleteCookies,
+                actionId: TYPE.deleteCookies,
+                urls:     ['http://localhost/'],
+
+                cookies: [{
+                    name: 'apiCookie13',
+                }],
+            });
+        });
+
+        it('Should create RequestCommand from object', () => {
+            const commandObj = {
+                type: TYPE.request,
+                url:  'http://localhost/',
+
+                options: {
+                    method: 'GET',
+                },
+            };
+
+            const command = createCommand(commandObj);
+
+            expect(JSON.parse(JSON.stringify(command))).eql({
+                type:     TYPE.request,
+                actionId: TYPE.request,
+                url:      'http://localhost/',
+
+                options: {
+                    method: 'GET',
+                },
             });
         });
     });
@@ -1289,14 +1386,14 @@ describe('Test run commands', () => {
                         type:     TYPE.click,
                         selector: 'element',
                         options:  {
-                            offsetX: 'offsetX',
+                            offsetX: 'ClickOptions.offsetX',
                         },
                     });
                 },
                 {
                     isTestCafeError: true,
                     code:            'E9',
-                    optionName:      'offsetX',
+                    optionName:      'ClickOptions.offsetX',
                     actualValue:     'string',
                     callsite:        null,
                 }
@@ -1315,7 +1412,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E9',
-                    optionName:      'offsetX',
+                    optionName:      'ClickOptions.offsetX',
                     actualValue:     10.5,
                     callsite:        null,
                 }
@@ -1389,7 +1486,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E9',
-                    optionName:      'offsetX',
+                    optionName:      'ClickOptions.offsetX',
                     actualValue:     'boolean',
                     callsite:        null,
                 }
@@ -1410,7 +1507,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E11',
-                    optionName:      'modifiers.shift',
+                    optionName:      'ModifiersOptions.shift',
                     actualValue:     'string',
                     callsite:        null,
                 }
@@ -1484,7 +1581,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E10',
-                    optionName:      'caretPos',
+                    optionName:      'ClickOptions.caretPos',
                     actualValue:     'string',
                     callsite:        null,
                 }
@@ -1558,7 +1655,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E9',
-                    optionName:      'offsetX',
+                    optionName:      'MouseOptions.offsetX',
                     actualValue:     'string',
                     callsite:        null,
                 }
@@ -1577,7 +1674,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E9',
-                    optionName:      'offsetY',
+                    optionName:      'MouseOptions.offsetY',
                     actualValue:     1.01,
                     callsite:        null,
                 }
@@ -1906,7 +2003,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E9',
-                    optionName:      'offsetX',
+                    optionName:      'TypeOptions.offsetX',
                     actualValue:     'string',
                     callsite:        null,
                 }
@@ -1926,7 +2023,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E11',
-                    optionName:      'replace',
+                    optionName:      'TypeOptions.replace',
                     actualValue:     'number',
                     callsite:        null,
                 }
@@ -2408,7 +2505,7 @@ describe('Test run commands', () => {
                         url:  'mail://testcafe@devexpress.com',
                     });
                 },
-                'Cannot prepare tests due to the following error:\n\nThe "mail://testcafe@devexpress.com" test page URL includes an unsupported mail:// protocol. TestCafe only supports http://, https:// and file:// protocols.'
+                'Cannot prepare tests due to the following error:\n\nInvalid test page URL: "mail://testcafe@devexpress.com". TestCafe cannot execute the test because the test page URL includes the mail protocol. TestCafe supports the following protocols: http://, https:// and file://.'
             );
         });
 
@@ -2753,7 +2850,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E11',
-                    optionName:      'portraitOrientation',
+                    optionName:      'ResizeToFitDeviceOptions.portraitOrientation',
                     actualValue:     'object',
                     callsite:        null,
                 }
@@ -2887,7 +2984,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E10',
-                    optionName:      'timeout',
+                    optionName:      'AssertionOptions.timeout',
                     actualValue:     'string',
                     callsite:        null,
                 }
@@ -2906,7 +3003,7 @@ describe('Test run commands', () => {
                 {
                     isTestCafeError: true,
                     code:            'E10',
-                    optionName:      'timeout',
+                    optionName:      'AssertionOptions.timeout',
                     actualValue:     10.5,
                     callsite:        null,
                 }
@@ -2928,7 +3025,7 @@ describe('Test run commands', () => {
                     isTestCafeError: true,
                     argumentName:    'actual',
                     actualValue:     'invalid js code',
-                    errMsg:          'Unexpected identifier',
+                    errMsg:          semver.gte(process.version, '19.0.0') ? "Unexpected identifier 'js'" : 'Unexpected identifier',
                     code:            'E59',
                     callsite:        null,
                     originError:     null,
@@ -3127,6 +3224,483 @@ describe('Test run commands', () => {
                     actualValue:     'number',
                     callsite:        null,
                 }
+            );
+        });
+
+        it('Should validate GetCookiesCommand', function () {
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.getCookies,
+                        cookies: [
+                            void 0,
+                        ],
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E86',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.getCookies,
+                        cookies: [
+                            {
+                                name: 'name',
+                            },
+                            void 0,
+                        ],
+                    });
+                },
+                {
+                    actualValue:     void 0,
+                    index:           1,
+                    isTestCafeError: true,
+                    code:            'E87',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type: TYPE.getCookies,
+                        urls: ['url.url'],
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E88',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type: TYPE.getCookies,
+                        urls: [
+                            'http://localhost/',
+                            'url.url',
+                        ],
+                    });
+                },
+                {
+                    actualValue:     'url.url',
+                    index:           1,
+                    isTestCafeError: true,
+                    code:            'E89',
+                    callsite:        null,
+                },
+            );
+        });
+
+        it('Should validate SetCookiesCommand', function () {
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.setCookies,
+                        cookies: [],
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E85',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.setCookies,
+                        cookies: [
+                            void 0,
+                        ],
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E86',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.setCookies,
+                        cookies: [
+                            {
+                                name: 'name',
+                            },
+                            void 0,
+                        ],
+                    });
+                },
+                {
+                    actualValue:     void 0,
+                    index:           1,
+                    isTestCafeError: true,
+                    code:            'E87',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type: TYPE.setCookies,
+                        url:  ['url.url'],
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E88',
+                    callsite:        null,
+                },
+            );
+        });
+
+        it('Should validate DeleteCookiesCommand', function () {
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.deleteCookies,
+                        cookies: [
+                            void 0,
+                        ],
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E86',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.deleteCookies,
+                        cookies: [
+                            {
+                                name: 'name',
+                            },
+                            void 0,
+                        ],
+                    });
+                },
+                {
+                    index:           1,
+                    actualValue:     void 0,
+                    isTestCafeError: true,
+                    code:            'E87',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type: TYPE.deleteCookies,
+                        urls: ['url.url'],
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E88',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type: TYPE.deleteCookies,
+                        urls: [
+                            'http://localhost/',
+                            'url.url',
+                        ],
+                    });
+                },
+                {
+                    index:           1,
+                    actualValue:     'url.url',
+                    isTestCafeError: true,
+                    code:            'E89',
+                    callsite:        null,
+                },
+            );
+        });
+
+        it('Should validate RequestCommand', function () {
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type: TYPE.request,
+                        url:  true,
+                    });
+                },
+                {
+                    actualValue:     'boolean',
+                    argumentName:    'url',
+                    isTestCafeError: true,
+                    code:            'E96',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            method: true,
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestOptions.method',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E90',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            headers: true,
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestOptions.headers',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E95',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            params: true,
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestOptions.params',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E94',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            timeout: 'true',
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestOptions.timeout',
+                    actualValue:     'string',
+                    isTestCafeError: true,
+                    code:            'E92',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            withCredentials: 'true',
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestOptions.withCredentials',
+                    actualValue:     'string',
+                    isTestCafeError: true,
+                    code:            'E11',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            auth: true,
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestOptions.auth',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E95',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            auth: {
+                                username: true,
+                                password: 'password',
+                            },
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestAuthOptions.username',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E90',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            auth: {
+                                username: 'username',
+                                password: true,
+                            },
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestAuthOptions.password',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E90',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            proxy: true,
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestOptions.proxy',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E95',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            proxy: {
+                                protocol: true,
+                            },
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestProxyOptions.protocol',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E90',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            proxy: {
+                                host: true,
+                                port: 3000,
+                            },
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestProxyOptions.host',
+                    actualValue:     'boolean',
+                    isTestCafeError: true,
+                    code:            'E90',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            proxy: {
+                                host: 'localhost',
+                                port: {},
+                            },
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestProxyOptions.port',
+                    actualValue:     'object',
+                    isTestCafeError: true,
+                    code:            'E92',
+                    callsite:        null,
+                },
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.request,
+                        options: {
+                            rawResponse: 'true',
+                        },
+                    });
+                },
+                {
+                    optionName:      'RequestOptions.rawResponse',
+                    actualValue:     'string',
+                    isTestCafeError: true,
+                    code:            'E11',
+                    callsite:        null,
+                },
             );
         });
     });

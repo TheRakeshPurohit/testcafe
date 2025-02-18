@@ -1,4 +1,4 @@
-interface Modifiers {
+export interface Modifiers {
     ctrl: boolean;
     alt: boolean;
     shift: boolean;
@@ -13,6 +13,7 @@ export class ActionOptions {
 export class OffsetOptions extends ActionOptions {
     public offsetX: number;
     public offsetY: number;
+    public isDefaultOffset?: boolean;
 }
 
 export class MouseOptions extends OffsetOptions {
@@ -21,6 +22,11 @@ export class MouseOptions extends OffsetOptions {
 
 export class ClickOptions extends MouseOptions {
     public caretPos: number;
+}
+
+export class ScrollOptions extends OffsetOptions {
+    public scrollToCenter?: boolean;
+    public skipParentFrames?: boolean;
 }
 
 export class MoveOptions extends MouseOptions {
@@ -63,4 +69,63 @@ export class ElementScreenshotOptions extends ActionOptions {
     public includeBorders: number;
     public includePaddings: number;
     public crop: CropOptions;
+}
+
+export class CookieOptions {
+    public constructor (obj: object, validate: boolean);
+    public name: string;
+    public value: string;
+    public domain: string;
+    public path: string;
+    public expires: Date;
+    public maxAge: number | 'Infinity' | '-Infinity';
+    public secure: boolean;
+    public httpOnly: boolean;
+    public sameSite: string;
+}
+
+export class RequestOptions {
+    public constructor (obj: object, validate: boolean);
+    public url: string | URL;
+    public method: string;
+    public headers: object;
+    public params: object;
+    public body: any;
+    public timeout: number;
+    public withCredentials: boolean;
+    public auth: RequestAuthOptions;
+    public proxy: RequestProxyOptions;
+    public rawResponse: boolean;
+}
+
+export class RequestAuthOptions {
+    public constructor (obj: object, validate: boolean);
+    public username: string;
+    public password: string;
+}
+
+export class RequestProxyOptions {
+    public constructor (obj: object, validate: boolean);
+    public protocol: string;
+    public host: string;
+    public port: number;
+    public auth: RequestAuthOptions;
+}
+
+export class GetProxyUrlOptions {
+    public constructor (obj: object, validate: boolean);
+    public credentials: number;
+}
+
+export class SkipJsErrorsOptions {
+    public constructor (obj: object, validate: boolean);
+    public stack?: string | RegExp;
+    public message?: string | RegExp;
+    public pageUrl?: string | RegExp;
+}
+
+export class SkipJsErrorsCallbackWithOptions {
+    public constructor (obj: object, validate: boolean);
+    public fn: SkipJsErrorsCallback;
+    public dependencies: { [key: string]: any }
 }

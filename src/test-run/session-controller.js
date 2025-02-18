@@ -6,6 +6,18 @@ import TestRun from './';
 const ACTIVE_SESSIONS_MAP = {};
 const UPLOADS_DIR_NAME = '_uploads_';
 
+// NOTE: Native Automation cookie implementation doesn't require client-server communication.
+// This stub was created to reduce conditional logic in connected classes.
+class NativeAutomationCookieStub {
+    getClientString () {
+        return '';
+    }
+
+    takePendingSyncCookies () {
+        return [];
+    }
+}
+
 export default class SessionController extends Session {
     constructor (uploadRoots, options) {
         super(uploadRoots, options);
@@ -14,8 +26,8 @@ export default class SessionController extends Session {
     }
 
     // Hammerhead payload
-    async getPayloadScript () {
-        return this.currentTestRun.getPayloadScript();
+    async getPayloadScript (windowId) {
+        return this.currentTestRun.getPayloadScript(windowId);
     }
 
     async getIframePayloadScript () {
@@ -39,8 +51,16 @@ export default class SessionController extends Session {
         return this.currentTestRun.handleFileDownload();
     }
 
+    handleAttachment (data) {
+        return this.currentTestRun.handleAttachment(data);
+    }
+
     handlePageError (ctx, err) {
         return this.currentTestRun.handlePageError(ctx, err);
+    }
+
+    createCookies () {
+        return this.options.nativeAutomation ? new NativeAutomationCookieStub() : super.createCookies();
     }
 
     // API
@@ -68,6 +88,7 @@ export default class SessionController extends Session {
                     disablePageCaching:   testRun.disablePageCaching,
                     allowMultipleWindows: TestRun.isMultipleWindowsAllowed(testRun),
                     requestTimeout:       testRun.requestTimeout,
+                    nativeAutomation:     testRun.isNativeAutomation,
                 };
 
                 if (options.allowMultipleWindows)

@@ -1,12 +1,12 @@
 import hammerhead from '../../deps/hammerhead';
 import testCafeCore from '../../deps/testcafe-core';
-import VisibleElementAutomation from '../visible-element-automation';
-import { fromPoint as getElementFromPoint } from '../../get-element';
+import VisibleElementAutomation from '../../visible-element-automation';
+import getElementFromPoint from '../../get-element';
 import * as selectUtils from './utils';
-import MoveAutomation from '../move';
+import MoveAutomation from '../move/move';
 import { MoveOptions } from '../../../../test-run/commands/options';
 import cursor from '../../cursor';
-import AUTOMATION_ERROR_TYPES from '../../errors';
+import { ActionElementIsInvisibleError } from '../../../../shared/errors';
 
 const Promise          = hammerhead.Promise;
 const browserUtils     = hammerhead.utils.browser;
@@ -23,7 +23,7 @@ const delay           = testCafeCore.delay;
 
 export default class SelectBaseAutomation extends VisibleElementAutomation {
     constructor (element, actionOptions) {
-        super(element, actionOptions);
+        super(element, actionOptions, window, cursor);
 
         this.absoluteStartPoint = null;
         this.absoluteEndPoint   = null;
@@ -45,13 +45,16 @@ export default class SelectBaseAutomation extends VisibleElementAutomation {
         };
     }
 
-    static _calculateEventArguments (point) {
-        const clientPoint = positionUtils.offsetToClientCoords(point);
+    _calculateEventArguments () {
+        const clientPoint = positionUtils.offsetToClientCoords(this.clientPoint);
 
-        return getElementFromPoint(clientPoint.x, clientPoint.y)
-            .then(({ element }) => {
-                if (!element)
-                    throw new Error(AUTOMATION_ERROR_TYPES.elementIsInvisibleError);
+        return getElementFromPoint(clientPoint)
+            .then(element => {
+                if (!element) {
+                    throw new ActionElementIsInvisibleError(null, {
+                        reason: positionUtils.getElOutsideBoundsReason(this.element),
+                    });
+                }
 
                 return {
                     element: element,
@@ -64,11 +67,12 @@ export default class SelectBaseAutomation extends VisibleElementAutomation {
     }
 
     _move ({ element, offsetX, offsetY, speed }) {
-        const moveOptions    = new MoveOptions({ offsetX, offsetY, speed }, false);
-        const moveAutomation = new MoveAutomation(element, moveOptions);
+        const moveOptions = new MoveOptions({ offsetX, offsetY, speed }, false);
 
-        return moveAutomation
-            .run()
+        return MoveAutomation.create(element, moveOptions, window, cursor)
+            .then(moveAutomation => {
+                return moveAutomation.run();
+            })
             .then(() => delay(this.automationSettings.mouseActionStepDelay));
     }
 
@@ -108,14 +112,13 @@ export default class SelectBaseAutomation extends VisibleElementAutomation {
     _mousedown () {
         return cursor
             .leftButtonDown()
-            .then(() => SelectBaseAutomation._calculateEventArguments(this.clientPoint))
+            .then(() => this._calculateEventArguments())
             .then(args => {
                 this.eventArgs = args;
 
-                // NOTE: In WebKit and IE, the mousedown event opens the select element's dropdown;
+                // NOTE: In WebKit, the mousedown event opens the select element's dropdown;
                 // therefore, we should prevent mousedown and hide the dropdown (B236416).
-                const needCloseSelectDropDown = (browserUtils.isWebKit || browserUtils.isIE) &&
-                                              domUtils.isSelectElement(this.element);
+                const needCloseSelectDropDown = browserUtils.isWebKit && domUtils.isSelectElement(this.element);
 
                 if (needCloseSelectDropDown)
                     this._bindMousedownHandler();
@@ -150,7 +153,7 @@ export default class SelectBaseAutomation extends VisibleElementAutomation {
             .then(() => {
                 this._setSelection();
 
-                return SelectBaseAutomation._calculateEventArguments(this.clientPoint);
+                return this._calculateEventArguments();
             })
             .then(args => {
                 this.eventArgs = args;

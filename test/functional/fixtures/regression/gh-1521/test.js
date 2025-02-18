@@ -15,7 +15,7 @@ describe('[Regression](GH-1521)', function () {
             shouldFail: true,
         })
             .catch(function (errs) {
-                expect(errs[0]).to.contains('The element that matches the specified selector is not visible');
+                expect(errs[0]).to.contains('The action target (<input id="out-of-viewport-input" value="value">) is located outside the the layout viewport.');
                 expect(errs[0]).to.contains(' > 65 |        await t.click(Selector(\'#out-of-viewport-input\', { timeout: 2000 }));');
             });
     });
@@ -30,11 +30,6 @@ describe('[Regression](GH-1521)', function () {
 
     it('Should wait while element is moving', function () {
         return runTests('testcafe-fixtures/index-test.js', 'Click on a moving element', { only: 'chrome' });
-    });
-
-    it('Should not wait for a timeout when clicks on a child of svg element', function () {
-        // NOTE: ie regression test
-        return runTests('testcafe-fixtures/index-test.js', 'Click on svg child');
     });
 
     it('Should not wait if the offset position of a fixed element is changing', function () {

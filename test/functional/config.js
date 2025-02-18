@@ -1,54 +1,24 @@
-const hostname = process.env.USE_PUBLIC_HOSTNAME ? process.env.HOSTNAME : '127.0.0.1';
+const hostname = /true/.test(process.env.USE_PUBLIC_HOSTNAME) ? process.env.HOSTNAME : '127.0.0.1';
 
 const browserProviderNames = {
-    sauceLabs:    'sauceLabs',
     browserstack: 'browserstack',
     remote:       'remote',
 };
 
 const testingEnvironmentNames = {
-    osXDesktopAndMSEdgeBrowsers: 'osx-desktop-and-ms-edge-browsers',
-    mobileBrowsers:              'mobile-browsers',
-    localBrowsersIE:             'local-browsers-ie',
-    localBrowsersChromeFirefox:  'local-browsers-chrome-firefox',
-    localBrowsers:               'local-browsers',
-    localChrome:                 'local-chrome',
-    localHeadlessChrome:         'local-headless-chrome',
-    localHeadlessFirefox:        'local-headless-firefox',
-    remote:                      'remote',
-    legacy:                      'legacy',
+    mobileBrowsers:             'mobile-browsers',
+    localBrowsersChromeFirefox: 'local-browsers-chrome-firefox',
+    localBrowsers:              'local-browsers',
+    localChrome:                'local-chrome',
+    localSafari:                'local-safari',
+    localHeadlessChrome:        'local-headless-chrome',
+    localHeadlessEdge:          'local-headless-edge',
+    localHeadlessFirefox:       'local-headless-firefox',
+    remote:                     'remote',
+    legacy:                     'legacy',
 };
 
 const testingEnvironments = {};
-
-testingEnvironments[testingEnvironmentNames.osXDesktopAndMSEdgeBrowsers] = {
-    jobName:  'functional tests - OS X desktop and MS edge browsers',
-    provider: browserProviderNames.browserstack,
-
-    browserstack: {
-        username:  process.env.BROWSER_STACK_USERNAME,
-        accessKey: process.env.BROWSER_STACK_ACCESS_KEY,
-    },
-
-    browsers: [
-        {
-            browserName: 'browserstack:safari@11.1:OS X High Sierra',
-            alias:       'safari',
-        },
-        {
-            browserName: 'browserstack:chrome@80:OS X High Sierra',
-            alias:       'chrome-osx',
-        },
-        {
-            browserName: 'browserstack:firefox@72:OS X High Sierra',
-            alias:       'firefox-osx',
-        },
-        {
-            browserName: 'browserstack:edge:OS X High Sierra',
-            alias:       'edge',
-        },
-    ],
-};
 
 testingEnvironments[testingEnvironmentNames.mobileBrowsers] = {
     jobName:  'functional tests - mobile browsers',
@@ -61,11 +31,11 @@ testingEnvironments[testingEnvironmentNames.mobileBrowsers] = {
 
     browsers: [
         {
-            browserName: 'browserstack:iPad Pro 12.9 2017@11',
+            browserName: 'browserstack:ipad:ios 15',
             alias:       'ipad',
         },
         {
-            browserName: 'browserstack:iPhone 7 Plus@10',
+            browserName: 'browserstack:iphone:ios 15',
             alias:       'iphone',
         },
     ],
@@ -82,14 +52,20 @@ testingEnvironments[testingEnvironmentNames.localBrowsers] = {
         },
         {
             platform:    'Windows 10',
-            browserName: 'ie',
-            version:     '11.0',
-            alias:       'ie',
-        },
-        {
-            platform:    'Windows 10',
             browserName: 'firefox',
             alias:       'firefox',
+        },
+    ],
+};
+
+testingEnvironments[testingEnvironmentNames.localSafari] = {
+    isLocalBrowsers: true,
+
+    browsers: [
+        {
+            browserName: 'safari',
+            userAgent:   'safari',
+            alias:       'safari',
         },
     ],
 };
@@ -102,19 +78,6 @@ testingEnvironments[testingEnvironmentNames.localChrome] = {
             platform:    'Windows 10',
             browserName: 'chrome',
             alias:       'chrome',
-        },
-    ],
-};
-
-testingEnvironments[testingEnvironmentNames.localBrowsersIE] = {
-    isLocalBrowsers: true,
-
-    browsers: [
-        {
-            platform:    'Windows 10',
-            browserName: 'ie',
-            version:     '11.0',
-            alias:       'ie',
         },
     ],
 };
@@ -148,6 +111,21 @@ testingEnvironments[testingEnvironmentNames.localHeadlessChrome] = {
             browserName: 'chrome:headless --no-sandbox',
             userAgent:   'headlesschrome',
             alias:       'chrome',
+        },
+    ],
+};
+
+testingEnvironments[testingEnvironmentNames.localHeadlessEdge] = {
+    isLocalBrowsers:    true,
+    isHeadlessBrowsers: true,
+
+    retryTestPages: true,
+
+    browsers: [
+        {
+            platform:    'Windows 10',
+            browserName: 'edge:headless --no-sandbox',
+            alias:       'edge',
         },
     ],
 };
@@ -221,16 +199,12 @@ module.exports = {
         return process.env.DEV_MODE === 'true';
     },
 
-    get proxyless () {
-        return process.env.PROXYLESS === 'true';
+    get nativeAutomation () {
+        return process.env.NATIVE_AUTOMATION === 'true';
     },
 
     get retryTestPages () {
-        return this.currentEnvironment.retryTestPages;
-    },
-
-    get experimentalDebug () {
-        return !!process.env.EXPERIMENTAL_DEBUG;
+        return this.currentEnvironment.retryTestPages && !this.nativeAutomation;
     },
 
     testingEnvironmentNames,
@@ -246,12 +220,13 @@ module.exports = {
     site: {
         viewsPath: './test/functional/',
         ports:     {
-            server1:                3000,
-            server2:                3001,
-            basicAuthServer:        3002,
-            ntlmAuthServer:         3003,
-            trustedProxyServer:     3004,
-            transparentProxyServer: 3005,
+            server1:                       3000,
+            server2:                       3001,
+            basicAuthServer:               3002,
+            ntlmAuthServer:                3003,
+            trustedProxyServer:            3004,
+            transparentProxyServer:        3005,
+            invalidCertificateHttpsServer: 3007,
         },
     },
 
@@ -261,4 +236,12 @@ module.exports = {
 
     testScreenshotsDir: '___test-screenshots___',
     testVideosDir:      '___test-videos___',
+
+    hasBrowser (alias) {
+        return this.currentEnvironment.browsers.some(browser => browser.alias.includes(alias));
+    },
+
+    get esm () {
+        return !!process.env.NODE_OPTIONS && process.env.NODE_OPTIONS.includes('--experimental-loader');
+    },
 };

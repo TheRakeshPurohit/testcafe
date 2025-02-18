@@ -1,9 +1,10 @@
-import VisibleElementAutomation from './visible-element-automation';
+import VisibleElementAutomation from '../visible-element-automation';
+import cursor from '../cursor';
 
 
 export default class HoverAutomation extends VisibleElementAutomation {
-    constructor (element, hoverOptions) {
-        super(element, hoverOptions);
+    constructor (element, hoverOptions, dispatchNativeAutomationEventFn) {
+        super(element, hoverOptions, window, cursor, dispatchNativeAutomationEventFn);
     }
 
     run (useStrictElementCheck) {

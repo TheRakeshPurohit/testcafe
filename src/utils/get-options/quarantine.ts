@@ -1,9 +1,9 @@
-import baseGetOptions from './base';
 import QUARANTINE_OPTION_NAMES from '../../configuration/quarantine-option-names';
 import { RUNTIME_ERRORS } from '../../errors/types';
 import { GeneralError } from '../../errors/runtime';
 import { Dictionary } from '../../configuration/interfaces';
 import TestRunErrorFormattableAdapter from '../../errors/test-run/formattable-adapter';
+import { getBooleanOrObjectOption } from './boolean-or-object-option';
 
 const DEFAULT_ATTEMPT_LIMIT = 5;
 const DEFAULT_THRESHOLD     = 3;
@@ -14,9 +14,11 @@ function _isQuarantineOption (option: string): option is QUARANTINE_OPTION_NAMES
     return Object.values(QUARANTINE_OPTION_NAMES).includes(option as QUARANTINE_OPTION_NAMES);
 }
 
-export function validateQuarantineOptions (options: Dictionary<string | number>, optionName: string): void {
-    if (Object.keys(options).some(key => !_isQuarantineOption(key)))
-        throw new GeneralError(RUNTIME_ERRORS.invalidQuarantineOption, optionName);
+export function validateQuarantineOptions (options: Dictionary<string | number>): void {
+    for (const key in options) {
+        if (!_isQuarantineOption(key))
+            throw new GeneralError(RUNTIME_ERRORS.invalidQuarantineOption, key);
+    }
 
     const attemptLimit     = typeof options.attemptLimit === 'number' ? options.attemptLimit : DEFAULT_ATTEMPT_LIMIT;
     const successThreshold = typeof options.successThreshold === 'number' ? options.successThreshold : DEFAULT_THRESHOLD;
@@ -32,23 +34,17 @@ export function validateQuarantineOptions (options: Dictionary<string | number>,
 }
 
 export async function getQuarantineOptions (optionName: string, options: string | boolean | Dictionary<string | number>): Promise<Dictionary<number> | boolean> {
-    if (typeof options === 'boolean')
-        return true;
+    const onOptionParsed = async (key: string, value: string): Promise<number> => {
+        if (!key || !value)
+            throw new GeneralError(RUNTIME_ERRORS.optionValueIsNotValidKeyValue, optionName);
 
-    const parsedOptions = await baseGetOptions(options, {
+        return Number(value);
+    };
+
+    return await getBooleanOrObjectOption<number>(optionName, options, {
+        onOptionParsed,
         skipOptionValueTypeConversion: true,
-
-        async onOptionParsed (key: string, value: string) {
-            if (!key || !value)
-                throw new GeneralError(RUNTIME_ERRORS.optionValueIsNotValidKeyValue, optionName);
-
-            return Number(value);
-        },
-    });
-
-    validateQuarantineOptions(parsedOptions, optionName);
-
-    return parsedOptions;
+    }, validateQuarantineOptions);
 }
 
 
@@ -57,25 +53,30 @@ interface AttemptResult {
     passedTimes: number;
 }
 
+interface QuarantineAttempt {
+    testRunId: string;
+    errors: TestRunErrorFormattableAdapter[];
+}
+
 export class Quarantine {
-    public attempts: TestRunErrorFormattableAdapter[][];
+    public attempts: QuarantineAttempt[];
     public attemptLimit: number;
     public successThreshold: number;
     public failureThreshold: number;
 
     public constructor () {
-        this.attempts = [];
-        this.attemptLimit = DEFAULT_ATTEMPT_LIMIT;
+        this.attempts         = [];
+        this.attemptLimit     = DEFAULT_ATTEMPT_LIMIT;
         this.successThreshold = DEFAULT_THRESHOLD;
         this.failureThreshold = DEFAULT_THRESHOLD;
     }
 
-    public getFailedAttempts (): TestRunErrorFormattableAdapter[][] {
-        return this.attempts.filter(errors => !!errors.length);
+    public getFailedAttempts (): QuarantineAttempt[] {
+        return this.attempts.filter(({ errors }) => !!errors.length);
     }
 
-    public getPassedAttempts (): TestRunErrorFormattableAdapter[][] {
-        return this.attempts.filter(errors => errors.length === 0);
+    public getPassedAttempts (): QuarantineAttempt[] {
+        return this.attempts.filter(({ errors }) => errors.length === 0);
     }
 
     public setCustomParameters (attemptLimit: number | undefined, successThreshold: number | undefined): void {

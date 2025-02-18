@@ -3,10 +3,12 @@ import processTestFnError from '../errors/process-test-fn-error';
 import Test from '../api/structure/test';
 import Fixture from '../api/structure/fixture';
 import TestRun from '../test-run';
+import executeFnWithTimeout from '../utils/execute-fn-with-timeout';
+import { getFixtureInfo } from '../utils/get-test-and-fixture-info';
 
 interface FixtureState {
     started: boolean;
-    runningFixtureBeforeHook: boolean;
+    testIsBlocked: boolean;
     fixtureBeforeHookErr: null | Error;
     pendingTestRunCount: number;
     fixtureCtx: object;
@@ -22,11 +24,11 @@ export default class FixtureHookController {
     private static _ensureFixtureMapItem (fixtureMap: Map<Fixture, FixtureState>, fixture: Fixture): void {
         if (!fixtureMap.has(fixture)) {
             const item = {
-                started:                  false,
-                runningFixtureBeforeHook: false,
-                fixtureBeforeHookErr:     null,
-                pendingTestRunCount:      0,
-                fixtureCtx:               Object.create(null),
+                started:              false,
+                testIsBlocked:        false,
+                fixtureBeforeHookErr: null,
+                pendingTestRunCount:  0,
+                fixtureCtx:           Object.create(null),
             };
 
             fixtureMap.set(fixture, item);
@@ -56,7 +58,50 @@ export default class FixtureHookController {
     public isTestBlocked (test: Test): boolean {
         const item = this._getFixtureMapItem(test);
 
-        return !!item && item.runningFixtureBeforeHook;
+        return !!item && item.testIsBlocked;
+    }
+
+    public unblockTest (test: Test): void {
+        const item = this._getFixtureMapItem(test);
+
+        if (item)
+            item.testIsBlocked = false;
+    }
+
+    public blockTestIfNecessary (test: Test): void {
+        const fixture = test.fixture as Fixture;
+        const item    = this._getFixtureMapItem(test);
+
+        if (item && (fixture.globalBeforeFn || fixture.beforeFn))
+            item.testIsBlocked = true;
+    }
+
+    private async _runFixtureBeforeHook (item: FixtureState, fn: Function, testRun: TestRun): Promise<boolean> {
+        if (!fn)
+            return true;
+
+        try {
+            await executeFnWithTimeout(fn, testRun.executionTimeout, item.fixtureCtx, getFixtureInfo(testRun));
+        }
+        catch (err) {
+            item.fixtureBeforeHookErr = processTestFnError(err);
+        }
+
+        return !item.fixtureBeforeHookErr;
+    }
+
+    private async _runFixtureAfterHook (item: FixtureState, fn: Function | null, testRun: TestRun): Promise<void> {
+        if (!fn)
+            return;
+
+        testRun.phase = TEST_RUN_PHASE.inFixtureAfterHook;
+
+        try {
+            await executeFnWithTimeout(fn, testRun.executionTimeout, item.fixtureCtx, getFixtureInfo(testRun));
+        }
+        catch (err) {
+            testRun.addError(processTestFnError(err));
+        }
     }
 
     public async runFixtureBeforeHookIfNecessary (testRun: TestRun): Promise<boolean> {
@@ -64,25 +109,16 @@ export default class FixtureHookController {
         const item    = this._getFixtureMapItem(testRun.test);
 
         if (item) {
-            const shouldRunBeforeHook = !item.started && fixture.beforeFn;
+            const shouldRunBeforeHook = !item.started;
 
             item.started = true;
 
-            if (shouldRunBeforeHook) {
-                item.runningFixtureBeforeHook = true;
-
-                try {
-                    await (fixture.beforeFn as Function)(item.fixtureCtx);
-                }
-                catch (err) {
-                    item.fixtureBeforeHookErr = processTestFnError(err);
-                }
-
-                item.runningFixtureBeforeHook = false;
-            }
+            const success = shouldRunBeforeHook
+                            && await this._runFixtureBeforeHook(item, fixture.globalBeforeFn as Function, testRun)
+                            && await this._runFixtureBeforeHook(item, fixture.beforeFn as Function, testRun);
 
             // NOTE: fail all tests in fixture if fixture.before hook has error
-            if (item.fixtureBeforeHookErr) {
+            if (!success && item.fixtureBeforeHookErr) {
                 testRun.phase = TEST_RUN_PHASE.inFixtureBeforeHook;
 
                 testRun.addError(item.fixtureBeforeHookErr);
@@ -108,22 +144,8 @@ export default class FixtureHookController {
         if (item.pendingTestRunCount !== 0)
             return;
 
-        if (fixture.afterFn) {
-            testRun.phase = TEST_RUN_PHASE.inFixtureAfterHook;
-
-            try {
-                await fixture.afterFn(item.fixtureCtx);
-            }
-            catch (err) {
-                testRun.addError(processTestFnError(err));
-            }
-        }
-
-        if (item.fixtureCtx) {
-            await testRun.compilerService?.removeFixtureCtx({
-                fixtureId: fixture.id,
-            });
-        }
+        await this._runFixtureAfterHook(item, fixture.afterFn, testRun);
+        await this._runFixtureAfterHook(item, fixture.globalAfterFn, testRun);
 
         this._fixtureMap.delete(fixture);
     }

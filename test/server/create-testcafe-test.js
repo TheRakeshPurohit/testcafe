@@ -1,19 +1,21 @@
-const expect                = require('chai').expect;
+const { expect }            = require('chai');
 const url                   = require('url');
 const net                   = require('net');
 const path                  = require('path');
+const proxyquire            = require('proxyquire');
 const createTestCafe        = require('../../lib/');
 const exportableLib         = require('../../lib/api/exportable-lib');
 const selfSignedCertificate = require('openssl-self-signed-certificate');
+const Extensions            = require('../../lib/configuration/formats');
 
-const {
-    CONFIGURATION_EXTENSIONS,
-    JS_CONFIGURATION_EXTENSION,
-    JSON_CONFIGURATION_EXTENSION,
-} = require('../../lib/configuration/formats');
+const TestCafeConfiguration = proxyquire('../../lib/configuration/testcafe-configuration', {
+    './utils': {
+        getValidHostname: hostname => hostname || 'calculated-hostname',
+    },
+});
 
-const jsConfigIndex   = CONFIGURATION_EXTENSIONS.indexOf(JS_CONFIGURATION_EXTENSION);
-const jsonConfigIndex = CONFIGURATION_EXTENSIONS.indexOf(JSON_CONFIGURATION_EXTENSION);
+const jsConfigIndex = TestCafeConfiguration.FILENAMES.findIndex(file=>file.includes(Extensions.js));
+const jsonConfigIndex = TestCafeConfiguration.FILENAMES.findIndex(file=>file.includes(Extensions.json));
 
 describe('TestCafe factory function', function () {
     let testCafe = null;
@@ -29,12 +31,14 @@ describe('TestCafe factory function', function () {
     afterEach(function () {
         if (server) {
             server.close();
+
             server = null;
         }
 
         const promisedClose = testCafe ? testCafe.close() : Promise.resolve();
 
         testCafe = null;
+
         return promisedClose;
     });
 
@@ -50,6 +54,8 @@ describe('TestCafe factory function', function () {
                 expect(bcUrl.hostname).not.eql('undefined');
                 expect(bcUrl.hostname).not.eql('null');
                 expect(isNaN(port)).to.be.false;
+
+                return bc.close();
             });
     });
 
@@ -64,6 +70,8 @@ describe('TestCafe factory function', function () {
 
                 expect(bcUrl.hostname).eql('localhost');
                 expect(port).eql(1338);
+
+                return bc.close();
             });
     });
 
@@ -89,6 +97,9 @@ describe('TestCafe factory function', function () {
     it("Should raise error if specified hostname doesn't resolve to the current machine", function () {
         return getTestCafe('example.org')
             .then(function () {
+                return testCafe.createBrowserConnection();
+            })
+            .then(function () {
                 throw new Error('Promise rejection expected');
             })
             .catch(function (err) {
@@ -109,6 +120,9 @@ describe('TestCafe factory function', function () {
         };
 
         return getTestCafe('localhost', 1338, 1339, sslOptions)
+            .then(() => {
+                return testCafe.createBrowserConnection();
+            })
             .then(() => {
                 expect(testCafe.proxy.server1.key).eql(sslOptions.key);
                 expect(testCafe.proxy.server1.cert).eql(sslOptions.cert);

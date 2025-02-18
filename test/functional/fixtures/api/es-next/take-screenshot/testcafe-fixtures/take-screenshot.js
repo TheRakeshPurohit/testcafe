@@ -1,12 +1,12 @@
 import { ClientFunction } from 'testcafe';
-import parseUserAgent from '../../../../../../../lib/utils/parse-user-agent';
-import { saveWindowState, restoreWindowState } from '../../../../../window-helpers';
-import quarantineScope from './quarantineScope';
+import { parseUserAgent } from '../../../../../../../lib/utils/parse-user-agent.js';
+import { saveWindowState, restoreWindowState } from '../../../../../esm-utils/window-helpers.js';
+import quarantineScope from './quarantineScope.js';
 import sanitizeFilename from 'sanitize-filename';
-import { readPngFile } from '../../../../../../../lib/utils/promisified-functions';
+import { readPngFile } from '../../../../../../../lib/utils/promisified-functions.js';
 import config from '../../../../../config.js';
 import { join } from 'path';
-
+import { getOSInfo } from 'get-os-info';
 
 // NOTE: to preserve callsites, add new tests AFTER the existing ones
 fixture `Take a screenshot`
@@ -61,7 +61,8 @@ test('Take screenshots with same path', async t => {
 
 test('Take screenshots for reporter', async t => {
     const ua            = await getUserAgent();
-    const safeUserAgent = sanitizeFilename(parseUserAgent(ua).prettyUserAgent).replace(/\s+/g, '_');
+    const osInfo        = await getOSInfo();
+    const safeUserAgent = sanitizeFilename(parseUserAgent(ua, osInfo).prettyUserAgent).replace(/\s+/g, '_');
 
     quarantineScope[safeUserAgent] = quarantineScope[safeUserAgent] || {};
 
@@ -123,14 +124,24 @@ test
         const expectedWidth  = width - scrollbarSize;
         const expectedHeight = height - scrollbarSize;
 
-        // NOTE: IE clips screenshots not accurately
-        const accuracy = parseUserAgent(ua).name === 'Internet Explorer' ? 1 : 0;
-
         await t.expect(scrollbarSize).gt(0);
-        await t.expect(Math.abs(png.width - expectedWidth)).lte(accuracy);
-        await t.expect(Math.abs(png.height - expectedHeight)).lte(accuracy);
+        await t.expect(png.width).eql(expectedWidth);
+        await t.expect(png.height).eql(expectedHeight);
     });
 
 test('Should add default extension', async t => {
     await t.takeScreenshot('screenshot-path');
+});
+
+test('Rewrite a screenshot with warning', async t => {
+    await t.takeScreenshot('custom/duplicate.png');
+    await t.takeScreenshot('custom/duplicate.png');
+});
+
+test('Take a screenshot with a pathPattern', async t => {
+    await t.takeScreenshot({ pathPattern: '${TEST}/custom' });
+});
+
+test('Should create a warning and use path parameter', async t => {
+    await t.takeScreenshot({ path: 'screenshot-path/custom', pathPattern: '${TEST}/custom' });
 });

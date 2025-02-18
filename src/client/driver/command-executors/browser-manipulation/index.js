@@ -9,9 +9,9 @@ import {
     scrollController,
     sendRequestToFrame,
     delay,
+    ScrollAutomation,
 } from '../../deps/testcafe-core';
 
-import { Scroll as ScrollAutomation } from '../../deps/testcafe-automation';
 import {
     hide as hideUI,
     show as showUI,
@@ -130,9 +130,8 @@ class ManipulationExecutor {
                         throw error;
                     });
             })
+            .then(() => ensureCropOptions(this.element, this.command.options))
             .then(() => {
-                ensureCropOptions(this.element, this.command.options);
-
                 const { scrollTargetX, scrollTargetY, scrollToCenter } = this.command.options;
 
                 const scrollAutomation = new ScrollAutomation(this.element, new ScrollOptions({

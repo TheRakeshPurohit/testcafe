@@ -21,38 +21,18 @@ export const reverse = createNativeMethodWrapper('reverse');
 export const reduce  = createNativeMethodWrapper('reduce');
 export const concat  = createNativeMethodWrapper('concat');
 export const join    = createNativeMethodWrapper('join');
+export const every   = createNativeMethodWrapper('every');
 
 export function isArray (arg) {
     return nativeMethods.objectToString.call(arg) === '[object Array]';
 }
 
 export function from (arg, ...args) {
-    if (nativeMethods.arrayFrom)
-        return nativeMethods.arrayFrom(arg, ...args);
-
-    // NOTE: this logic is for IE
-    const arr    = [];
-    const length = arg.length;
-
-    for (let i = 0; i < length; i++)
-        arr.push(arg[i]);
-
-    return arr;
+    return nativeMethods.arrayFrom(arg, ...args);
 }
 
 export function find (arr, callback) {
-    if (nativeMethods.arrayFind)
-        return nativeMethods.arrayFind.call(arr, callback);
-
-    // NOTE: this logic is for IE
-    const length = arr.length;
-
-    for (let i = 0; i < length; i++) {
-        if (callback(arr[i], i, arr))
-            return arr[i];
-    }
-
-    return null;
+    return nativeMethods.arrayFind.call(arr, callback);
 }
 
 export function remove (arr, item) {

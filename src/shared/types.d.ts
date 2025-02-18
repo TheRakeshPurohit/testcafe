@@ -1,5 +1,7 @@
 /* global globalThis */
 
+import { ExecuteSelectorCommand } from '../test-run/commands/execute-client-function';
+
 export interface NativeMethods {
     setTimeout: typeof globalThis.setTimeout;
     clearTimeout: typeof globalThis.clearTimeout;
@@ -12,20 +14,46 @@ export interface NativeMethods {
     dateNow: DateConstructor['now'];
 }
 
-export interface SharedAdapter {
-    nativeMethods: NativeMethods;
-    PromiseCtor: typeof Promise;
-}
-
-interface ClientRequestEmitter<R> {
+export interface ClientRequestEmitter<R> {
     onRequestSend: (fn: (req: R) => void) => void;
     onRequestCompleted: (fn: (req: R) => void) => void;
     onRequestError: (fn: (req: R) => void) => void;
     offAll: () => void;
 }
 
-interface ScriptExecutionEmitter<S> {
+export interface ScriptExecutionEmitter<S> {
     onScriptAdded: (fn: (scr: S) => void) => void;
     onScriptLoadedOrFailed: (fn: (scr: S) => void) => void;
     offAll: () => void;
+}
+
+interface AutomationErrorCtor {
+    name: string;
+    firstArg: string | null;
+}
+
+interface AutomationErrorCtors {
+    notFound: AutomationErrorCtor | string;
+    invisible: AutomationErrorCtor | string;
+}
+
+export type ExecuteSelectorFn<T> = (selector: ExecuteSelectorCommand, errCtors: AutomationErrorCtors, startTime: number) => Promise<T>;
+
+interface NextTestRunInfo {
+    testRunId: string;
+    url: string;
+}
+
+interface OpenBrowserOptions {
+    serviceDomains: string[];
+    developmentMode: boolean;
+}
+
+interface NativeAutomationInitOptions extends OpenBrowserOptions {
+    isHeadless: boolean;
+}
+
+interface OpenBrowserAdditionalOptions extends OpenBrowserOptions {
+    disableMultipleWindows: boolean;
+    nativeAutomation: boolean;
 }

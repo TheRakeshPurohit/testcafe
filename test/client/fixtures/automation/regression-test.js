@@ -5,8 +5,6 @@ const nativeMethods    = hammerhead.nativeMethods;
 const Promise          = hammerhead.Promise;
 
 const testCafeCore     = window.getTestCafeModule('testCafeCore');
-const eventUtils       = testCafeCore.eventUtils;
-const positionUtils    = testCafeCore.positionUtils;
 const textSelection    = testCafeCore.textSelection;
 const parseKeySequence = testCafeCore.parseKeySequence;
 
@@ -24,6 +22,9 @@ const TypeAutomation       = testCafeAutomation.Type;
 const SelectTextAutomation = testCafeAutomation.SelectText;
 const PressAutomation      = testCafeAutomation.Press;
 const getOffsetOptions     = testCafeAutomation.getOffsetOptions;
+const cursor               = testCafeAutomation.cursor;
+
+const IS_MOBILE_SAFARI = browserUtils.isSafari && featureDetection.isTouchDevice;
 
 testCafeCore.preventRealEvents();
 
@@ -48,11 +49,6 @@ $(document).ready(function () {
     };
 
     $(body).css('height', 1500);
-    //NOTE: problem with window.top bodyMargin in IE9 if test 'runAll'
-    //because we can't determine that element is in qunit test iframe
-
-    if (browserUtils.isIE9)
-        $(window.top.document).find('body').css('marginTop', '0px');
 
     const createDraggable = function (currentWindow, currentDocument, left, top) {
         const curDocument = currentDocument || document;
@@ -140,11 +136,9 @@ $(document).ready(function () {
         return $draggable;
     };
 
-    const startNext = function () {
-        if (browserUtils.isIE) {
-            removeTestElements();
-            window.setTimeout(start, 30);
-        }
+    const startNext = function (delay) {
+        if (delay)
+            window.setTimeout(start, delay);
         else
             start();
     };
@@ -168,7 +162,8 @@ $(document).ready(function () {
     };
 
     const runClickAutomation = function (el, options, callback) {
-        const offsets      = getOffsetOptions(el, options.offsetX, options.offsetY);
+        const offsets = getOffsetOptions(el, options.offsetX, options.offsetY);
+
         const clickOptions = new ClickOptions({
             offsetX:  offsets.offsetX,
             offsetY:  offsets.offsetY,
@@ -182,15 +177,16 @@ $(document).ready(function () {
             },
         });
 
-        const clickAutomation = new ClickAutomation(el, clickOptions);
+        const clickAutomation = new ClickAutomation(el, clickOptions, window, cursor);
 
-        clickAutomation
+        return clickAutomation
             .run()
             .then(callback);
     };
 
     const runDblClickAutomation = function (el, options, callback) {
-        const offsets      = getOffsetOptions(el, options.offsetX, options.offsetY);
+        const offsets = getOffsetOptions(el, options.offsetX, options.offsetY);
+
         const clickOptions = new ClickOptions({
             offsetX:  offsets.offsetX,
             offsetY:  offsets.offsetY,
@@ -206,13 +202,14 @@ $(document).ready(function () {
 
         const dblClickAutomation = new DblClickAutomation(el, clickOptions);
 
-        dblClickAutomation
+        return dblClickAutomation
             .run()
             .then(callback);
     };
 
     const runTypeAutomation = function (element, text, options) {
-        const offsets     = getOffsetOptions(element);
+        const offsets = getOffsetOptions(element);
+
         const typeOptions = new TypeOptions({
             caretPos: options.caretPos,
             replace:  options.replace,
@@ -227,57 +224,10 @@ $(document).ready(function () {
     };
 
     QUnit.testDone(function () {
-        if (!browserUtils.isIE)
-            removeTestElements();
+        removeTestElements();
     });
 
     module('regression tests');
-
-    if (browserUtils.isIE) {
-        asyncTest('click on submit button child (B236676)', function () {
-            const $form         = $('<form></form>').addClass(TEST_ELEMENT_CLASS).appendTo('body');
-            const $button       = $('<button></button>').attr('type', 'submit').addClass(TEST_ELEMENT_CLASS).appendTo($form);
-            const $img          = $('<img />').attr('alt', 'img').addClass(TEST_ELEMENT_CLASS).appendTo($button);
-
-            let imgClicked    = false;
-            let buttonClicked = false;
-            let formSubmitted = false;
-
-            $form.submit(function (ev) {
-                formSubmitted = true;
-                eventUtils.preventDefault(ev);
-                return false;
-            });
-
-            $button.click(function () {
-                buttonClicked = true;
-            });
-
-            $img.click(function () {
-                imgClicked = true;
-            });
-
-            runClickAutomation($img[0], {}, function () {
-
-                //in IE submit button's children do not receive click event if user clicks on it
-                ok(formSubmitted, 'form submit received');
-                ok(buttonClicked, 'button click received');
-                ok(!imgClicked, 'img click not received');
-
-                formSubmitted = buttonClicked = imgClicked = false;
-
-                runClickAutomation($button[0], {
-                    offsetX: Math.round($button[0].offsetWidth / 2),
-                    offsetY: Math.round($button[0].offsetHeight / 2),
-                }, function () {
-                    ok(formSubmitted, 'form submit received');
-                    ok(buttonClicked, 'button click received');
-                    ok(!imgClicked, 'img click not received');
-                    startNext();
-                });
-            });
-        });
-    }
 
     if (!featureDetection.isTouchDevice) {
         asyncTest('B236966 - TESTCafe - onmouseout event is not called during the execution of the method hover.', function () {
@@ -296,7 +246,7 @@ $(document).ready(function () {
             });
 
             runHoverAutomation($element[0], function () {
-                equal(firstEvent, browserUtils.isIE ? 'mousemove' : 'mouseover');
+                equal(firstEvent, 'mouseover');
                 startNext();
             });
         });
@@ -392,92 +342,89 @@ $(document).ready(function () {
             });
     });
 
-    if (!browserUtils.isIE) {
-        //TODO: IE wrong detection dimension top for element if this element have height more than scrollable container
-        //and element's top less than container top
-        asyncTest('B237890 - Wrong scroll before second click on big element in scrollable container', function () {
-            let clickCount  = 0;
-            let errorScroll = false;
+    // TODO: make the test stable on iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('B237890 - Wrong scroll before second click on big element in scrollable container', function () {
+        let clickCount  = 0;
+        let errorScroll = false;
 
-            const $scrollableContainer = $('<div />')
-                .css({
-                    position: 'absolute',
-                    left:     '200px',
-                    top:      '250px',
-                    border:   '1px solid black',
-                    overflow: 'scroll',
-                })
-                .width(250)
-                .height(200)
-                .addClass(TEST_ELEMENT_CLASS)
-                .appendTo(body);
+        const $scrollableContainer = $('<div />')
+            .css({
+                position: 'absolute',
+                left:     '200px',
+                top:      '250px',
+                border:   '1px solid black',
+                overflow: 'scroll',
+            })
+            .width(250)
+            .height(200)
+            .addClass(TEST_ELEMENT_CLASS)
+            .appendTo(body);
 
-            $('<div></div>').addClass(TEST_ELEMENT_CLASS)
-                .css({
-                    height:          '20px',
-                    width:           '20px',
-                    marginTop:       2350 + 'px',
-                    backgroundColor: '#ffff00',
-                })
-                .appendTo($scrollableContainer);
+        $('<div></div>').addClass(TEST_ELEMENT_CLASS)
+            .css({
+                height:          '20px',
+                width:           '20px',
+                marginTop:       2350 + 'px',
+                backgroundColor: '#ffff00',
+            })
+            .appendTo($scrollableContainer);
 
-            $('<div></div>').addClass(TEST_ELEMENT_CLASS)
-                .css({
-                    position: 'absolute',
-                    height:   '20px',
-                    width:    '20px',
-                    left:     '600px',
-                })
-                .appendTo(body);
+        $('<div></div>').addClass(TEST_ELEMENT_CLASS)
+            .css({
+                position: 'absolute',
+                height:   '20px',
+                width:    '20px',
+                left:     '600px',
+            })
+            .appendTo(body);
 
-            const scrollHandler = function () {
-                if (clickCount === 1)
-                    errorScroll = true;
-            };
+        const scrollHandler = function () {
+            if (clickCount === 1)
+                errorScroll = true;
+        };
 
-            const bindScrollHandlers = function () {
-                $scrollableContainer.bind('scroll', scrollHandler);
-                $(window).bind('scroll', scrollHandler);
-            };
+        const bindScrollHandlers = function () {
+            $scrollableContainer.bind('scroll', scrollHandler);
+            $(window).bind('scroll', scrollHandler);
+        };
 
-            const unbindScrollHandlers = function () {
-                $scrollableContainer.unbind('scroll', scrollHandler);
-                $(window).unbind('scroll', scrollHandler);
-            };
+        const unbindScrollHandlers = function () {
+            $scrollableContainer.unbind('scroll', scrollHandler);
+            $(window).unbind('scroll', scrollHandler);
+        };
 
-            const $element = $('<div></div>')
-                .addClass(TEST_ELEMENT_CLASS)
-                .css({
-                    width:           '150px',
-                    height:          '400px',
-                    position:        'absolute',
-                    backgroundColor: 'red',
-                    left:            '50px',
-                    top:             '350px',
-                })
-                .appendTo($scrollableContainer)
-                .bind('mousedown', function () {
-                    unbindScrollHandlers();
-                })
-                .bind('click', function () {
-                    clickCount++;
+        const $element = $('<div></div>')
+            .addClass(TEST_ELEMENT_CLASS)
+            .css({
+                width:           '150px',
+                height:          '400px',
+                position:        'absolute',
+                backgroundColor: 'red',
+                left:            '50px',
+                top:             '350px',
+            })
+            .appendTo($scrollableContainer)
+            .bind('mousedown', function () {
+                unbindScrollHandlers();
+            })
+            .bind('click', function () {
+                clickCount++;
 
-                });
+            });
 
+        bindScrollHandlers();
+
+        runClickAutomation($element[0], {}, function () {
+            equal(clickCount, 1);
             bindScrollHandlers();
 
             runClickAutomation($element[0], {}, function () {
-                equal(clickCount, 1);
-                bindScrollHandlers();
-
-                runClickAutomation($element[0], {}, function () {
-                    equal(clickCount, 2);
-                    ok(!errorScroll);
-                    startNext();
-                });
+                equal(clickCount, 2);
+                ok(!errorScroll);
+                startNext();
             });
         });
-    }
+    });
 
     asyncTest('B237763 - ASPxPageControl - Lite render - Tabs are not clicked in Firefox', function () {
         const $list       = $('<div></div>').addClass(TEST_ELEMENT_CLASS).appendTo('body');
@@ -492,7 +439,7 @@ $(document).ready(function () {
 
         runClickAutomation($b[0], {}, function () {
             ok(clickRaised);
-            startNext();
+            startNext(IS_MOBILE_SAFARI && 500);
         });
     });
 
@@ -538,7 +485,8 @@ $(document).ready(function () {
         }, 2000);
     });
 
-    asyncTest('B238560 - Change event is not raised during TestCafe test running', function () {
+    // TODO: stabilize test on iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('B238560 - Change event is not raised during TestCafe test running', function () {
         const $input = $('<input type="checkbox" />').addClass(TEST_ELEMENT_CLASS).appendTo('body');
 
         let changeRaised = false;
@@ -553,7 +501,8 @@ $(document).ready(function () {
         });
     });
 
-    asyncTest('B252929 - Wrong behavior during recording dblclick on input', function () {
+    // TODO: stabilize test on iOS
+    (browserUtils.isIOS ? QUnit.skip : asyncTest)('B252929 - Wrong behavior during recording dblclick on input', function () {
         const $input = createInput();
 
         let dblclickCount = 0;
@@ -673,10 +622,10 @@ $(document).ready(function () {
             addEventListener('contextmenu');
             addEventListener('dblclick');
 
-            const click    = new ClickAutomation(el, { offsetX: 5, offsetY: 5 });
+            const click    = new ClickAutomation(el, { offsetX: 5, offsetY: 5 }, window, cursor);
             const rClick   = new RClickAutomation(el, { offsetX: 5, offsetY: 5 });
             const dblClick = new DblClickAutomation(el, { offsetX: 5, offsetY: 5 });
-            const mouseOut = new ClickAutomation(mouseOutEl, { offsetX: 5, offsetY: 5 });
+            const mouseOut = new ClickAutomation(mouseOutEl, { offsetX: 5, offsetY: 5 }, window, cursor);
 
             click.run()
                 .then(function () {
@@ -693,97 +642,6 @@ $(document).ready(function () {
                         startNext();
                     });
                 });
-        });
-    }
-
-    if (browserUtils.isIE) {
-        //TODO: fix it for other browsers
-        asyncTest('Unexpected focus events are raised during click', function () {
-            let input1FocusCount = 0;
-            let input2FocusCount = 0;
-
-            const $input1 = createInput().attr('id', '1').focus(function () {
-                input1FocusCount++;
-            });
-
-            const $input2 = createInput().attr('id', '2').focus(function () {
-                input2FocusCount++;
-                $input1[0].focus();
-            });
-
-            runClickAutomation($input2[0], {}, function () {
-                equal(input1FocusCount, 1);
-                equal(input2FocusCount, 1);
-
-                startNext();
-            });
-        });
-
-        asyncTest('Unexpected focus events are raised during dblclick', function () {
-            let input1FocusCount = 0;
-            let input2FocusCount = 0;
-
-            const $input1 = createInput().attr('id', '1').focus(function () {
-                input1FocusCount++;
-            });
-
-            const $input2 = createInput().attr('id', '2').focus(function () {
-                input2FocusCount++;
-                $input1[0].focus();
-            });
-
-            runDblClickAutomation($input2[0], {}, function () {
-                equal(input1FocusCount, browserUtils.isIE ? 1 : 2);
-                equal(input2FocusCount, browserUtils.isIE ? 1 : 2);
-
-                startNext();
-            });
-        });
-    }
-
-    if (browserUtils.isIE && browserUtils.version > 9) {
-        asyncTest('T109295 - User action act.click isn\'t raised by click on map', function () {
-            const initText = 'click';
-            const $input   = createInput('button').attr('value', initText).css({
-                position: 'absolute',
-                left:     '200px',
-                top:      '200px',
-            });
-
-            let log = '';
-
-            const listenedEvents = {
-                mouse:    ['mouseover', 'mouseout', 'mousedown', 'mouseup', 'click'],
-                touch:    ['touchstart', 'touchend'],
-                pointer:  ['pointerover', 'pointerout', 'pointerdown', 'pointerup'],
-                MSevents: ['MSPointerOver', 'MSPointerOut', 'MSPointerDown', 'MSPointerUp'],
-            };
-
-            const addListeners = function (el, events) {
-                $.each(events, function (index, event) {
-                    el.addEventListener(event, function (e) {
-                        if (log !== '')
-                            log += ', ';
-
-                        log += e.type;
-                    });
-                });
-            };
-
-            addListeners($input[0], listenedEvents.mouse);
-
-            if (browserUtils.version > 10)
-                addListeners($input[0], listenedEvents.pointer);
-            else
-                addListeners($input[0], listenedEvents.MSevents);
-
-            runClickAutomation($input[0], {}, function () {
-                if (browserUtils.version > 10)
-                    equal(log, 'pointerover, mouseover, pointerdown, mousedown, pointerup, mouseup, click');
-                else
-                    equal(log, 'MSPointerOver, mouseover, MSPointerDown, mousedown, MSPointerUp, mouseup, click');
-                startNext();
-            });
         });
     }
 
@@ -841,370 +699,305 @@ $(document).ready(function () {
 
     module('regression tests with input type="number"');
 
-    if (!browserUtils.isIE9) {
-        asyncTest('B254340 - click on input with type="number"', function () {
-            const $input     = createInput('number').val('123');
-            const caretPos   = 2;
+    asyncTest('B254340 - click on input with type="number"', function () {
+        const $input     = createInput('number').val('123');
+        const caretPos   = 2;
 
-            let clickCount = 0;
+        let clickCount = 0;
 
-            $input.click(function () {
-                clickCount++;
-            });
-
-            runClickAutomation($input[0], {
-                caretPos: caretPos,
-            }, function () {
-                equal(textSelection.getSelectionStart($input[0]), caretPos, 'start selection correct');
-                equal(textSelection.getSelectionEnd($input[0]), caretPos, 'end selection correct');
-                equal(clickCount, 1);
-                startNext();
-            });
+        $input.click(function () {
+            clickCount++;
         });
 
-        if (!browserUtils.isFirefox) {
-            asyncTest('B254340 - select in input with type="number"', function () {
-                const initText = '12345678987654321';
-                const input    = createInput('number').attr('value', initText).val(initText)[0];
-                const startPos = 5;
-                const endPos   = 11;
-                const backward = true;
-
-                const selectTextAutomation = new SelectTextAutomation(input, endPos, startPos, {});
-
-                selectTextAutomation
-                    .run()
-                    .then(function () {
-                        equal(textSelection.getSelectionStart(input), startPos, 'start selection correct');
-                        equal(textSelection.getSelectionEnd(input), endPos, 'end selection correct');
-
-                        if (!window.DIRECTION_ALWAYS_IS_FORWARD)
-                            equal(textSelection.hasInverseSelection(input), backward, 'selection direction correct');
-
-                        startNext();
-                    });
-            });
-        }
-
-        asyncTest('T133144 - Incorrect typing into an input with type "number" in FF during test executing (without caretPos)', function () {
-            const initText = '12345';
-            const text     = '123';
-            const newText  = initText + text;
-            const $input   = createInput('number').attr('value', initText);
-
-            runTypeAutomation($input[0], text, {})
-                .then(function () {
-                    equal($input[0].value, newText);
-                    equal(textSelection.getSelectionStart($input[0]), newText.length, 'start selection correct');
-                    equal(textSelection.getSelectionEnd($input[0]), newText.length, 'end selection correct');
-
-                    startNext();
-                });
+        runClickAutomation($input[0], {
+            caretPos: caretPos,
+        }, function () {
+            equal(textSelection.getSelectionStart($input[0]), caretPos, 'start selection correct');
+            equal(textSelection.getSelectionEnd($input[0]), caretPos, 'end selection correct');
+            equal(clickCount, 1);
+            startNext();
         });
+    });
 
-        asyncTest('T133144 - Incorrect typing into an input with type "number" in FF during test executing (with caretPos)', function () {
-            const initText = '12345';
-            const text     = '123';
-            const $input   = createInput('number').attr('value', initText);
-            const caretPos = 2;
+    if (!browserUtils.isFirefox) {
+        asyncTest('B254340 - select in input with type="number"', function () {
+            const initText = '12345678987654321';
+            const input    = createInput('number').attr('value', initText).val(initText)[0];
+            const startPos = 5;
+            const endPos   = 11;
+            const backward = true;
 
-            runTypeAutomation($input[0], text, {
-                caretPos: caretPos,
-            })
-                .then(function () {
-                    equal($input[0].value, initText.substring(0, caretPos) + text + initText.substring(caretPos));
-                    equal(textSelection.getSelectionStart($input[0]), caretPos +
-                                                                      text.length, 'start selection correct');
+            const selectTextAutomation = new SelectTextAutomation(input, endPos, startPos, {});
 
-                    equal(textSelection.getSelectionEnd($input[0]), caretPos + text.length, 'end selection correct');
-
-                    startNext();
-                });
-        });
-
-        asyncTest('T133144 - Incorrect typing into an input with type "number" in FF during test executing (with replace)', function () {
-            const initText = '12345';
-            const text     = '678';
-            const $input   = createInput('number').attr('value', initText);
-
-            runTypeAutomation($input[0], text, {
-                replace: true,
-            })
-                .then(function () {
-                    equal($input[0].value, text);
-                    equal(textSelection.getSelectionStart($input[0]), text.length, 'start selection correct');
-                    equal(textSelection.getSelectionEnd($input[0]), text.length, 'end selection correct');
-
-                    startNext();
-                });
-        });
-
-        asyncTest('T138385 - input type="number" leave out "maxlength" attribute (act.type)', function () {
-            const $input          = createInput('number').attr('maxLength', 2);
-
-            let inputEventCount = 0;
-
-            $input.bind('input', function () {
-                inputEventCount++;
-            });
-
-            runTypeAutomation($input[0], '123', {})
-                .then(function () {
-                    equal(inputEventCount, 3);
-                    equal($input.val(), browserUtils.isIE ? '12' : '123');
-
-                    startNext();
-                });
-        });
-
-        asyncTest('T138385 - input type "number" leave out "maxlength" attribute (act.press)', function () {
-            const $input          = createInput('number').attr('maxLength', 2);
-            const keySequence     = '1 2 3';
-            const pressAutomation = new PressAutomation(parseKeySequence(keySequence).combinations, {});
-
-            let inputEventCount = 0;
-
-            $input.bind('input', function () {
-                inputEventCount++;
-            });
-
-            $input[0].focus();
-
-            pressAutomation
+            selectTextAutomation
                 .run()
                 .then(function () {
-                    equal(inputEventCount, 3);
-                    equal($input.val(), browserUtils.isIE ? '12' : '123');
-
-                    startNext();
-                });
-        });
-
-        asyncTest('B254340 - type letters in input with type="number" (symbol in start)', function () {
-            const input = createInput('number')[0];
-
-            runTypeAutomation(input, '+12', {})
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '-12', {});
-                })
-                .then(function () {
-                    equal(input.value, '-12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '.12', {});
-                })
-                .then(function () {
-                    equal(input.value, '.12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '+-12', {});
-                })
-                .then(function () {
-                    equal(input.value, '-12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, 'a12', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '$12', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-
-                    startNext();
-                });
-        });
-
-        asyncTest('B254340 - type letters in input with type="number" (symbol in the middle)', function () {
-            const input = createInput('number')[0];
-
-            runTypeAutomation(input, '1+2', {})
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '1-2', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '1.2', {});
-                })
-                .then(function () {
-                    equal(input.value, '1.2');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '1+-2', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '1a2', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '1$2', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    document.body.removeChild(input);
-                    startNext();
-                });
-        });
-
-        asyncTest('B254340 - type letters in input with type="number" (symbol in the end)', function () {
-            const input = createInput('number')[0];
-
-            runTypeAutomation(input, '12+', {})
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '12-', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '12.', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '12+-', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '12a', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '';
-
-                    return runTypeAutomation(input, '12$', {});
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    document.body.removeChild(input);
-
-                    startNext();
-                });
-        });
-
-        asyncTest('B254340 - type letters in input with type="number" (one symbol)', function () {
-            const input = createInput('number').val('12')[0];
-
-            runTypeAutomation(input, '+', { caretPos: 0 })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '12';
-
-                    return runTypeAutomation(input, '-', { caretPos: 0 });
-                })
-                .then(function () {
-                    equal(input.value, '-12');
-                    input.value = '12';
-
-                    return runTypeAutomation(input, '.', { caretPos: 0 });
-                })
-                .then(function () {
-                    equal(input.value, '.12');
-                    input.value = '12';
-
-                    return runTypeAutomation(input, '+-', { caretPos: 0 });
-                })
-                .then(function () {
-                    equal(input.value, '-12');
-                    input.value = '12';
-
-                    return runTypeAutomation(input, '$', { caretPos: 0 });
-                })
-                .then(function () {
-                    equal(input.value, '12');
-                    input.value = '12';
-
-                    return runTypeAutomation(input, '-12', { caretPos: 0 });
-                })
-                .then(function () {
-                    equal(input.value, '-1212');
-                    document.body.removeChild(input);
+                    equal(textSelection.getSelectionStart(input), startPos, 'start selection correct');
+                    equal(textSelection.getSelectionEnd(input), endPos, 'end selection correct');
+                    equal(textSelection.hasInverseSelection(input), backward, 'selection direction correct');
 
                     startNext();
                 });
         });
     }
 
-    test('Scrolling works wrong in specific scenario in IE (gh-2002)', function () {
-        const mockParentDimension = {
-            top:    0,
-            bottom: 782,
-            height: 782,
-            left:   0,
-            right:  1423,
-            width:  1423,
+    asyncTest('T133144 - Incorrect typing into an input with type "number" in FF during test executing (without caretPos)', function () {
+        const initText = '12345';
+        const text     = '123';
+        const newText  = initText + text;
+        const $input   = createInput('number').attr('value', initText);
 
-            border: {
-                top:    0,
-                right:  0,
-                bottom: 0,
-                left:   0,
-            },
+        runTypeAutomation($input[0], text, {})
+            .then(function () {
+                equal($input[0].value, newText);
+                equal(textSelection.getSelectionStart($input[0]), newText.length, 'start selection correct');
+                equal(textSelection.getSelectionEnd($input[0]), newText.length, 'end selection correct');
 
-            scroll: {
-                left: 0,
-                top:  255,
-            },
+                startNext();
+            });
+    });
 
-            scrollbar: {
-                bottom: 0,
-                right:  0,
-            },
-        };
+    asyncTest('T133144 - Incorrect typing into an input with type "number" in FF during test executing (with caretPos)', function () {
+        const initText = '12345';
+        const text     = '123';
+        const $input   = createInput('number').attr('value', initText);
+        const caretPos = 2;
 
-        const mockChildDimension = {
-            top:    3.91999983787566,
-            bottom: 777.91999983787566,
-            height: 774,
-            left:   571.5,
-            right:  991.5,
-            width:  420,
+        runTypeAutomation($input[0], text, {
+            caretPos: caretPos,
+        })
+            .then(function () {
+                equal($input[0].value, initText.substring(0, caretPos) + text + initText.substring(caretPos));
+                equal(textSelection.getSelectionStart($input[0]), caretPos +
+                                                                      text.length, 'start selection correct');
 
-            border: {
-                top:    2,
-                right:  2,
-                bottom: 2,
-                left:   2,
-            },
+                equal(textSelection.getSelectionEnd($input[0]), caretPos + text.length, 'end selection correct');
 
-            scroll: {
-                left: 0,
-                top:  0,
-            },
+                startNext();
+            });
+    });
 
-            scrollbar: {
-                bottom: 0,
-                right:  0,
-            },
-        };
+    asyncTest('T133144 - Incorrect typing into an input with type "number" in FF during test executing (with replace)', function () {
+        const initText = '12345';
+        const text     = '678';
+        const $input   = createInput('number').attr('value', initText);
 
-        deepEqual(positionUtils.calcRelativePosition(mockChildDimension, mockParentDimension), {
-            top:    4,
-            right:  431,
-            bottom: 4,
-            left:   572,
+        runTypeAutomation($input[0], text, {
+            replace: true,
+        })
+            .then(function () {
+                equal($input[0].value, text);
+                equal(textSelection.getSelectionStart($input[0]), text.length, 'start selection correct');
+                equal(textSelection.getSelectionEnd($input[0]), text.length, 'end selection correct');
+
+                startNext();
+            });
+    });
+
+    asyncTest('T138385 - input type="number" leave out "maxlength" attribute (act.type)', function () {
+        const $input          = createInput('number').attr('maxLength', 2);
+
+        let inputEventCount = 0;
+
+        $input.bind('input', function () {
+            inputEventCount++;
         });
+
+        runTypeAutomation($input[0], '123', {})
+            .then(function () {
+                equal(inputEventCount, 3);
+                equal($input.val(), '123');
+
+                startNext();
+            });
+    });
+
+    asyncTest('T138385 - input type "number" leave out "maxlength" attribute (act.press)', function () {
+        const $input          = createInput('number').attr('maxLength', 2);
+        const keySequence     = '1 2 3';
+        const pressAutomation = new PressAutomation(parseKeySequence(keySequence).combinations, {});
+
+        let inputEventCount = 0;
+
+        $input.bind('input', function () {
+            inputEventCount++;
+        });
+
+        $input[0].focus();
+
+        pressAutomation
+            .run()
+            .then(function () {
+                equal(inputEventCount, 3);
+                equal($input.val(), '123');
+
+                startNext();
+            });
+    });
+
+    asyncTest('B254340 - type letters in input with type="number" (symbol in start)', function () {
+        const input = createInput('number')[0];
+
+        runTypeAutomation(input, '+12', {})
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '-12', {});
+            })
+            .then(function () {
+                equal(input.value, '-12');
+                input.value = '';
+
+                return runTypeAutomation(input, '.12', {});
+            })
+            .then(function () {
+                equal(input.value, '.12');
+                input.value = '';
+
+                return runTypeAutomation(input, '+-12', {});
+            })
+            .then(function () {
+                equal(input.value, '-12');
+                input.value = '';
+
+                return runTypeAutomation(input, 'a12', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '$12', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+
+                startNext();
+            });
+    });
+
+    asyncTest('B254340 - type letters in input with type="number" (symbol in the middle)', function () {
+        const input = createInput('number')[0];
+
+        runTypeAutomation(input, '1+2', {})
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '1-2', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '1.2', {});
+            })
+            .then(function () {
+                equal(input.value, '1.2');
+                input.value = '';
+
+                return runTypeAutomation(input, '1+-2', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '1a2', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '1$2', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                document.body.removeChild(input);
+                startNext();
+            });
+    });
+
+    asyncTest('B254340 - type letters in input with type="number" (symbol in the end)', function () {
+        const input = createInput('number')[0];
+
+        runTypeAutomation(input, '12+', {})
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '12-', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '12.', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '12+-', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '12a', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '';
+
+                return runTypeAutomation(input, '12$', {});
+            })
+            .then(function () {
+                equal(input.value, '12');
+                document.body.removeChild(input);
+
+                startNext();
+            });
+    });
+
+    asyncTest('B254340 - type letters in input with type="number" (one symbol)', function () {
+        const input = createInput('number').val('12')[0];
+
+        runTypeAutomation(input, '+', { caretPos: 0 })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '12';
+
+                return runTypeAutomation(input, '-', { caretPos: 0 });
+            })
+            .then(function () {
+                equal(input.value, '-12');
+                input.value = '12';
+
+                return runTypeAutomation(input, '.', { caretPos: 0 });
+            })
+            .then(function () {
+                equal(input.value, '.12');
+                input.value = '12';
+
+                return runTypeAutomation(input, '+-', { caretPos: 0 });
+            })
+            .then(function () {
+                equal(input.value, '-12');
+                input.value = '12';
+
+                return runTypeAutomation(input, '$', { caretPos: 0 });
+            })
+            .then(function () {
+                equal(input.value, '12');
+                input.value = '12';
+
+                return runTypeAutomation(input, '-12', { caretPos: 0 });
+            })
+            .then(function () {
+                equal(input.value, '-1212');
+                document.body.removeChild(input);
+
+                startNext();
+            });
     });
 });

@@ -4,7 +4,7 @@ const fs              = require('fs');
 const createTestCafe  = require('../../../../../../lib');
 const config          = require('../../../../config');
 const { expect }      = require('chai');
-const { getFreePort } = require('endpoint-utils');
+const { getFreePort } = require('../../../../../../lib/utils/endpoint-utils');
 
 const resourceRequestCounter = {
     script1: 0,
@@ -79,7 +79,7 @@ async function run ({ src, browser }) {
     await testcafe.createRunner()
         .src(path.join(__dirname, src))
         .browsers(browser)
-        .run();
+        .run({ disableNativeAutomation: !config.nativeAutomation });
 
     await testcafe.close();
 }

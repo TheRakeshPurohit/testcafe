@@ -29,11 +29,12 @@ import {
 import sendConfirmationMessage from '../send-confirmation-message';
 
 export default class ChildIframeDriverLink {
-    constructor (driverWindow, driverId) {
-        this.driverWindow              = driverWindow;
-        this.driverIframe              = domUtils.findIframeByWindow(driverWindow);
-        this.driverId                  = driverId;
-        this.iframeAvailabilityTimeout = 0;
+    constructor (driverWindow, driverId, dispatchNativeAutomationEventUrls) {
+        this.driverWindow                      = driverWindow;
+        this.driverIframe                      = domUtils.findIframeByWindow(driverWindow);
+        this.driverId                          = driverId;
+        this.iframeAvailabilityTimeout         = 0;
+        this.dispatchNativeAutomationEventUrls = dispatchNativeAutomationEventUrls;
     }
 
     set availabilityTimeout (val) {
@@ -44,7 +45,7 @@ export default class ChildIframeDriverLink {
         if (!domUtils.isElementInDocument(this.driverIframe))
             return Promise.reject(new CurrentIframeNotFoundError());
 
-        return waitFor(() => positionUtils.isElementVisible(this.driverIframe) ? this.driverIframe : null,
+        return waitFor(() => positionUtils.isIframeVisible(this.driverIframe) ? this.driverIframe : null,
             CHECK_IFRAME_VISIBLE_INTERVAL, this.iframeAvailabilityTimeout)
             .catch(() => {
                 throw new CurrentIframeIsInvisibleError();
@@ -92,7 +93,7 @@ export default class ChildIframeDriverLink {
     sendConfirmationMessage (requestMsgId) {
         sendConfirmationMessage({
             requestMsgId,
-            result: { id: this.driverId },
+            result: { id: this.driverId, dispatchNativeAutomationEventUrls: this.dispatchNativeAutomationEventUrls },
             window: this.driverWindow,
         });
     }

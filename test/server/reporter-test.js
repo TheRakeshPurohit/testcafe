@@ -9,6 +9,7 @@ const Videos                          = require('../../lib/video-recorder/videos
 const delay                           = require('../../lib/utils/delay');
 const { ReporterPluginError }         = require('../../lib/errors/runtime');
 const WarningLog                      = require('../../lib/notifications/warning-log');
+const util                            = require('util');
 
 
 describe('Reporter', () => {
@@ -28,8 +29,12 @@ describe('Reporter', () => {
     ];
 
     const browserConnectionMocks = [
-        { userAgent: 'Chrome' },
-        { userAgent: 'Firefox' },
+        {
+            userAgent: 'Chrome',
+        },
+        {
+            userAgent: 'Firefox',
+        },
     ];
 
     const fixtureMocks = [
@@ -181,8 +186,12 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[0],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             quarantine:        {
-                attempts: [['1', '2'], []],
+                attempts: [
+                    { testRunId: 'firstRunId', errors: ['1', '2'] },
+                    { testRunId: 'secondRunId', errors: [] },
+                ],
             },
             browser: browserMocks[0],
         },
@@ -194,6 +203,7 @@ describe('Reporter', () => {
             unstable:          false,
             browserConnection: browserConnectionMocks[0],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[0],
 
             errs: [
@@ -210,6 +220,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[0],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[0],
         },
 
@@ -221,6 +232,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[0],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[0],
         },
 
@@ -232,6 +244,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[0],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[0],
         },
 
@@ -243,6 +256,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[0],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[0],
         },
 
@@ -254,6 +268,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[0],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[0],
         },
 
@@ -265,6 +280,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[0],
             errs:              [],
             warningLog:        { messages: ['warning2'] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[0],
         },
     ];
@@ -278,8 +294,12 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[1],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             quarantine:        {
-                attempts: [['1', '2'], []],
+                attempts: [
+                    { testRunId: 'firstRunId', errors: ['1', '2'] },
+                    { testRunId: 'secondRunId', errors: [] },
+                ],
             },
             browser: browserMocks[1],
         },
@@ -292,6 +312,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[1],
             errs:              [{ text: 'err1' }],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[1],
         },
 
@@ -303,6 +324,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[1],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[1],
         },
 
@@ -314,6 +336,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[1],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[1],
         },
 
@@ -325,6 +348,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[1],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[1],
         },
 
@@ -336,6 +360,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[1],
             errs:              [{ text: 'err1' }],
             warningLog:        { messages: ['warning1'] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[1],
         },
 
@@ -347,6 +372,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[1],
             errs:              [],
             warningLog:        { messages: [] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[1],
         },
 
@@ -358,6 +384,7 @@ describe('Reporter', () => {
             browserConnection: browserConnectionMocks[1],
             errs:              [],
             warningLog:        { messages: ['warning2', 'warning3'] },
+            reportDataLog:     { data: [] },
             browser:           browserMocks[1],
         },
     ];
@@ -442,6 +469,8 @@ describe('Reporter', () => {
                     'warning3',
                 ],
             };
+
+            this.startTime = new Date('1970-01-01T00:00:00.000Z');
         }
 
         _createBrowserJobs () {
@@ -474,14 +503,14 @@ describe('Reporter', () => {
 
     it('MessageBus events', () => {
         function createReporter (messageBus) {
-            return new Reporter({}, messageBus);
+            return new Reporter({ plugin: {}, messageBus });
         }
 
         const messageBus = new MessageBus();
 
         createReporter(messageBus);
 
-        expect(messageBus.listenerCount()).eql(7);
+        expect(messageBus.listenerCount()).eql(9);
         expect(messageBus.listenerCount('warning-add')).eql(1);
         expect(messageBus.listenerCount('start')).eql(1);
         expect(messageBus.listenerCount('test-run-start')).eql(1);
@@ -489,6 +518,8 @@ describe('Reporter', () => {
         expect(messageBus.listenerCount('test-action-start')).eql(1);
         expect(messageBus.listenerCount('test-action-done')).eql(1);
         expect(messageBus.listenerCount('done')).eql(1);
+        expect(messageBus.listenerCount('unhandled-rejection')).eql(1);
+        expect(messageBus.listenerCount('report-data')).eql(1);
     });
 
     it('Should analyze task progress and call appropriate plugin methods', function () {
@@ -498,51 +529,60 @@ describe('Reporter', () => {
 
         function createReporter () {
             return new Reporter({
-                reportTaskStart: function (...args) {
-                    expect(args[0]).to.be.a('date');
+                plugin: {
+                    reportTaskStart: function (...args) {
+                        expect(args[0]).to.be.a('date');
 
-                    // NOTE: replace startTime
-                    args[0] = new Date('Thu Jan 01 1970 00:00:00 UTC');
+                        // NOTE: replace startTime
+                        args[0] = new Date('Thu Jan 01 1970 00:00:00 UTC');
 
-                    return delay(1000)
-                        .then(() => log.push({ method: 'reportTaskStart', args: args }));
+                        return delay(1000)
+                            .then(() => log.push({ method: 'reportTaskStart', args: args }));
+                    },
+
+                    reportFixtureStart: function () {
+                        return delay(1000)
+                            .then(() => log.push({
+                                method: 'reportFixtureStart', args: Array.prototype.slice.call(arguments),
+                            }));
+                    },
+
+                    reportTestStart: function (...args) {
+                        expect(args[0]).to.be.an('string');
+                        expect(args[2].startTime).to.be.a('date');
+
+                        args[2].testRunIds = args[2].testRunIds.sort();
+
+                        // NOTE: replace startTime
+                        args[2].startTime = new Date('Thu Jan 01 1970 00:00:00 UTC');
+
+                        return delay(1000)
+                            .then(() => log.push({ method: 'reportTestStart', args: args }));
+                    },
+
+                    reportTestDone: function (...args) {
+                        expect(args[1].durationMs).to.be.an('number');
+
+                        // NOTE: replace durationMs
+                        args[1].durationMs = 74000;
+                        args[1].browsers   = sortBy(args[1].browsers, ['alias']);
+
+                        return delay(1000)
+                            .then(() => log.push({ method: 'reportTestDone', args: args }));
+                    },
+
+                    reportTaskDone: function (...args) {
+                        expect(args[0]).to.be.a('date');
+
+                        // NOTE: replace endTime
+                        args[0] = new Date('Thu Jan 01 1970 00:15:25 UTC');
+
+                        return delay(1000)
+                            .then(() => log.push({ method: 'reportTaskDone', args: args }));
+                    },
                 },
-
-                reportFixtureStart: function () {
-                    return delay(1000)
-                        .then(() => log.push({ method: 'reportFixtureStart', args: Array.prototype.slice.call(arguments) }));
-                },
-
-                reportTestStart: function (...args) {
-                    expect(args[0]).to.be.an('string');
-
-                    args[2].testRunIds = args[2].testRunIds.sort();
-
-                    return delay(1000)
-                        .then(() => log.push({ method: 'reportTestStart', args: args }));
-                },
-
-                reportTestDone: function (...args) {
-                    expect(args[1].durationMs).to.be.an('number');
-
-                    // NOTE: replace durationMs
-                    args[1].durationMs = 74000;
-                    args[1].browsers = sortBy(args[1].browsers, ['alias']);
-
-                    return delay(1000)
-                        .then(() => log.push({ method: 'reportTestDone', args: args }));
-                },
-
-                reportTaskDone: function (...args) {
-                    expect(args[0]).to.be.a('date');
-
-                    // NOTE: replace endTime
-                    args[0] = new Date('Thu Jan 01 1970 00:15:25 UTC');
-
-                    return delay(1000)
-                        .then(() => log.push({ method: 'reportTaskDone', args: args }));
-                },
-            }, taskMock._messageBus);
+                messageBus: taskMock._messageBus,
+            });
         }
 
         const expectedLog = [
@@ -678,6 +718,8 @@ describe('Reporter', () => {
                             'f1t1',
                             'f1t1ff',
                         ],
+                        startTime: new Date('1970-01-01T00:00:00.000Z'),
+                        skipped:   false,
                     },
                 ],
             },
@@ -694,8 +736,10 @@ describe('Reporter', () => {
                         unstable:   true,
                         skipped:    false,
                         quarantine: {
-                            1: { passed: false },
-                            2: { passed: true },
+                            1:             { passed: false },
+                            2:             { passed: true },
+                            'firstRunId':  { passed: false, errors: ['1', '2'] },
+                            'secondRunId': { passed: true, errors: [] },
                         },
                         screenshotPath: '/screenshots/1445437598847',
                         screenshots:    [{
@@ -710,18 +754,38 @@ describe('Reporter', () => {
                         testId:   'idf1t1',
                         browsers: [
                             {
-                                alias:     'Chrome',
-                                userAgent: 'Chrome',
-                                headless:  false,
-                                testRunId: 'f1t1',
+                                alias:                        'Chrome',
+                                userAgent:                    'Chrome',
+                                headless:                     false,
+                                testRunId:                    'f1t1',
+                                quarantineAttemptsTestRunIds: [
+                                    'firstRunId',
+                                    'secondRunId',
+                                ],
                             },
                             {
-                                alias:     'Firefox',
-                                userAgent: 'Firefox',
-                                headless:  false,
-                                testRunId: 'f1t1ff',
+                                alias:                        'Firefox',
+                                userAgent:                    'Firefox',
+                                headless:                     false,
+                                testRunId:                    'f1t1ff',
+                                quarantineAttemptsTestRunIds: [
+                                    'firstRunId',
+                                    'secondRunId',
+                                ],
                             },
                         ],
+                        fixture: {
+                            id:   'fid1',
+                            name: 'fixture1',
+                            path: './file1.js',
+                            meta: {
+                                run: 'run-001',
+                            },
+                        },
+                        reportData: {
+                            'f1t1':   [],
+                            'f1t1ff': [],
+                        },
                     },
                     {
                         run: 'run-001',
@@ -743,6 +807,8 @@ describe('Reporter', () => {
                             'f1t2',
                             'f1t2ff',
                         ],
+                        startTime: new Date('1970-01-01T00:00:00.000Z'),
+                        skipped:   false,
                     },
                 ],
             },
@@ -805,6 +871,18 @@ describe('Reporter', () => {
                                 testRunId: 'f1t2ff',
                             },
                         ],
+                        fixture: {
+                            id:   'fid1',
+                            name: 'fixture1',
+                            path: './file1.js',
+                            meta: {
+                                run: 'run-001',
+                            },
+                        },
+                        reportData: {
+                            f1t2:   [],
+                            f1t2ff: [],
+                        },
                     },
                     {
                         run: 'run-001',
@@ -826,6 +904,8 @@ describe('Reporter', () => {
                             'f1t3',
                             'f1t3ff',
                         ],
+                        startTime: new Date('1970-01-01T00:00:00.000Z'),
+                        skipped:   false,
                     },
                 ],
             },
@@ -860,6 +940,18 @@ describe('Reporter', () => {
                                 testRunId: 'f1t3ff',
                             },
                         ],
+                        fixture: {
+                            id:   'fid1',
+                            name: 'fixture1',
+                            path: './file1.js',
+                            meta: {
+                                run: 'run-001',
+                            },
+                        },
+                        reportData: {
+                            f1t3:   [],
+                            f1t3ff: [],
+                        },
                     },
                     {
                         run: 'run-001',
@@ -891,6 +983,8 @@ describe('Reporter', () => {
                             'f2t1',
                             'f2t1ff',
                         ],
+                        startTime: new Date('1970-01-01T00:00:00.000Z'),
+                        skipped:   false,
                     },
                 ],
             },
@@ -925,6 +1019,18 @@ describe('Reporter', () => {
                                 testRunId: 'f2t1ff',
                             },
                         ],
+                        fixture: {
+                            id:   'fid2',
+                            name: 'fixture2',
+                            path: './file1.js',
+                            meta: {
+                                run: 'run-002',
+                            },
+                        },
+                        reportData: {
+                            f2t1:   [],
+                            f2t1ff: [],
+                        },
                     },
                     {
                         run: 'run-001',
@@ -946,6 +1052,8 @@ describe('Reporter', () => {
                             'f2t2',
                             'f2t2ff',
                         ],
+                        startTime: new Date('1970-01-01T00:00:00.000Z'),
+                        skipped:   false,
                     },
                 ],
             },
@@ -980,6 +1088,18 @@ describe('Reporter', () => {
                                 testRunId: 'f2t2ff',
                             },
                         ],
+                        fixture: {
+                            id:   'fid2',
+                            name: 'fixture2',
+                            path: './file1.js',
+                            meta: {
+                                run: 'run-002',
+                            },
+                        },
+                        reportData: {
+                            f2t2:   [],
+                            f2t2ff: [],
+                        },
                     },
                     {
                         run: 'run-001',
@@ -1009,6 +1129,8 @@ describe('Reporter', () => {
                             'f3t1',
                             'f3t1ff',
                         ],
+                        startTime: new Date('1970-01-01T00:00:00.000Z'),
+                        skipped:   false,
                     },
                 ],
             },
@@ -1049,6 +1171,16 @@ describe('Reporter', () => {
                                 testRunId: 'f3t1ff',
                             },
                         ],
+                        fixture: {
+                            id:   'fid3',
+                            name: 'fixture3',
+                            path: './file2.js',
+                            meta: null,
+                        },
+                        reportData: {
+                            f3t1:   [],
+                            f3t1ff: [],
+                        },
                     },
                     {
                         run: 'run-001',
@@ -1070,6 +1202,8 @@ describe('Reporter', () => {
                             'f3t2',
                             'f3t2ff',
                         ],
+                        startTime: new Date('1970-01-01T00:00:00.000Z'),
+                        skipped:   true,
                     },
                 ],
             },
@@ -1104,6 +1238,16 @@ describe('Reporter', () => {
                                 testRunId: 'f3t2ff',
                             },
                         ],
+                        fixture: {
+                            id:   'fid3',
+                            name: 'fixture3',
+                            path: './file2.js',
+                            meta: null,
+                        },
+                        reportData: {
+                            f3t2:   [],
+                            f3t2ff: [],
+                        },
                     },
                     {
                         run: 'run-001',
@@ -1125,6 +1269,8 @@ describe('Reporter', () => {
                             'f3t3',
                             'f3t3ff',
                         ],
+                        startTime: new Date('1970-01-01T00:00:00.000Z'),
+                        skipped:   false,
                     },
                 ],
             },
@@ -1159,6 +1305,16 @@ describe('Reporter', () => {
                                 testRunId: 'f3t3ff',
                             },
                         ],
+                        fixture: {
+                            id:   'fid3',
+                            name: 'fixture3',
+                            path: './file2.js',
+                            meta: null,
+                        },
+                        reportData: {
+                            f3t3:   [],
+                            f3t3ff: [],
+                        },
                     },
                     {
                         run: 'run-001',
@@ -1200,7 +1356,7 @@ describe('Reporter', () => {
 
     it('Should disable colors if plugin has "noColors" flag', () => {
         const taskMock = new TaskMock();
-        const reporter = new Reporter({ noColors: true }, taskMock._messageBus);
+        const reporter = new Reporter({ plugin: { noColors: true }, messageBus: taskMock._messageBus });
 
         expect(reporter.plugin.chalk.enabled).to.be.false;
     });
@@ -1234,14 +1390,17 @@ describe('Reporter', () => {
 
         function createReporter () {
             return new Reporter({
-                reportTaskStart:    noop,
-                reportTaskDone:     noop,
-                reportFixtureStart: noop,
-                reportTestStart:    noop,
-                reportTestDone:     (name, testRunInfo) => {
-                    videoLog.push(testRunInfo.videos);
+                plugin: {
+                    reportTaskStart:    noop,
+                    reportTaskDone:     noop,
+                    reportFixtureStart: noop,
+                    reportTestStart:    noop,
+                    reportTestDone:     (name, testRunInfo) => {
+                        videoLog.push(testRunInfo.videos);
+                    },
                 },
-            }, taskMock._messageBus);
+                messageBus: taskMock._messageBus,
+            });
         }
 
         createReporter();
@@ -1262,7 +1421,7 @@ describe('Reporter', () => {
                     [
                         { testRunId: 'f1t2-id1', videoPath: 'f1t2-path1' },
                         { testRunId: 'f1t2-id2', videoPath: 'f1t2-path2' },
-                    ]]
+                    ]],
                 );
             });
     });
@@ -1277,7 +1436,7 @@ describe('Reporter', () => {
                 };
             }
 
-            return new Reporter(reporterObject, task._messageBus, null, 'customReporter');
+            return new Reporter({ plugin: reporterObject, messageBus: task._messageBus, name: 'customReporter' });
         }
 
         const taskMock = new TaskMock();
@@ -1293,6 +1452,35 @@ describe('Reporter', () => {
 
             expect(lastErr).instanceOf(ReporterPluginError);
             expect(lastErr.message).startsWith(`The "${method}" method of the "customReporter" reporter produced an uncaught error. Error details:\nError: oops`);
+        }
+    });
+
+    it('More tolerant error handling for reporter plugin methods', async () => {
+        const taskMock = new TaskMock();
+        const reporter = new Reporter({
+            plugin: {
+                [ReporterPluginMethod.reportTaskStart]: (error) => {
+                    throw error;
+                },
+            },
+            messageBus: taskMock._messageBus, name: 'customReporter',
+        });
+
+        const errs = [
+            void 0,
+            null,
+            { size: 'big' },
+            new Error('oops'),
+        ];
+
+        for (const err of errs) {
+            try {
+                await reporter.dispatchToPlugin({ method: ReporterPluginMethod.reportTaskStart, args: [err] });
+            }
+            catch (e) {
+                expect(e).instanceOf(ReporterPluginError);
+                expect(e.stack).contains(err?.stack || util.inspect(err));
+            }
         }
     });
 });

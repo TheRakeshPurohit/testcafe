@@ -35,7 +35,7 @@ function determineScrollPoint (cropStart, cropEnd, viewportBound) {
     return Math.round(cropStart + limitNumber(cropEnd - cropStart, 0, viewportBound) / 2);
 }
 
-export default function ensureCropOptions (element, options) {
+export default async function ensureCropOptions (element, options) {
     const elementRectangle = element.getBoundingClientRect();
 
     const elementBounds = {

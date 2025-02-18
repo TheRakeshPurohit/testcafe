@@ -15,6 +15,7 @@ const PressAutomation      = testCafeAutomation.Press;
 
 const ClickOptions = testCafeAutomation.ClickOptions;
 const TypeOptions  = testCafeAutomation.TypeOptions;
+const cursor       = testCafeAutomation.cursor;
 
 testCafeCore.preventRealEvents();
 
@@ -50,12 +51,7 @@ $(document).ready(function () {
     };
 
     const startNext = function () {
-        if (browserUtils.isIE) {
-            removeTestElements();
-            window.setTimeout(start, 30);
-        }
-        else
-            start();
+        start();
     };
 
     const removeTestElements = function () {
@@ -330,8 +326,7 @@ $(document).ready(function () {
 
     //tests
     QUnit.testDone(function () {
-        if (!browserUtils.isIE)
-            removeTestElements();
+        removeTestElements();
     });
 
     module('detection element under cursor after events simulation');
@@ -344,7 +339,7 @@ $(document).ready(function () {
 
         bindMouseHandlersToSwappingElements($div1, $div2, 'mousedown', eventMonitorObject);
 
-        const click = new ClickAutomation($div1[0], new ClickOptions());
+        const click = new ClickAutomation($div1[0], new ClickOptions(), window, cursor);
 
         click
             .run()
@@ -369,7 +364,7 @@ $(document).ready(function () {
 
         bindMouseHandlersToSwappingElements($div1, $div2, 'mouseup', eventMonitorObject);
 
-        const click = new ClickAutomation($div1[0], new ClickOptions());
+        const click = new ClickAutomation($div1[0], new ClickOptions(), window, cursor);
 
         click
             .run()
@@ -394,7 +389,7 @@ $(document).ready(function () {
 
         bindMouseHandlersToSwappingElements($div1, $div2, 'click', eventMonitorObject);
 
-        const click = new ClickAutomation($div1[0], new ClickOptions());
+        const click = new ClickAutomation($div1[0], new ClickOptions(), window, cursor);
 
         click
             .run()

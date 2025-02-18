@@ -1,12 +1,14 @@
 import { InvalidSelectorResultError } from '../../../../../shared/errors/index';
 import {
-    visible,
     isNodeCollection,
     isArrayOfNodes,
     castToArray,
-} from '../../../utils/element-utils';
+} from './utils';
 import { APIInfo, FilterOptions } from '../types';
-import adapter from '../adapter/index';
+// @ts-ignore
+import { nativeMethods } from '../../../deps/hammerhead';
+// @ts-ignore
+import { positionUtils } from '../../../deps/testcafe-core';
 
 
 const SELECTOR_FILTER_ERROR = {
@@ -36,13 +38,13 @@ class SelectorFilter {
 
     public filter (nodes: Node[], options: FilterOptions, apiInfo: APIInfo): number | Node | Node[] | undefined {
         if (options.filterVisible) {
-            nodes = nodes.filter(visible);
+            nodes = nodes.filter(positionUtils.isElementVisible);
 
             this._assertFilterError(nodes, apiInfo, SELECTOR_FILTER_ERROR.filterVisible);
         }
 
         if (options.filterHidden) {
-            nodes = nodes.filter(n => !visible(n));
+            nodes = nodes.filter(n => !positionUtils.isElementVisible(n));
 
             this._assertFilterError(nodes, apiInfo, SELECTOR_FILTER_ERROR.filterHidden);
         }
@@ -78,8 +80,8 @@ class SelectorFilter {
         if (searchResult === null || searchResult === void 0)
             return [];
 
-        else if (searchResult instanceof adapter.nativeMethods.Node)
-            return [searchResult];
+        else if (searchResult instanceof nativeMethods.Node)
+            return [searchResult as Node];
 
         else if (isArrayOfNodes(searchResult))
             return searchResult;

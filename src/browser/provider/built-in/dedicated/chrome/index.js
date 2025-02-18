@@ -3,9 +3,18 @@ import { parse as parseUrl } from 'url';
 import dedicatedProviderBase from '../base';
 import ChromeRunTimeInfo from './runtime-info';
 import getConfig from './config';
-import { start as startLocalChrome, stop as stopLocalChrome } from './local-chrome';
+import {
+    start as startLocalChrome,
+    startOnDocker as startLocalChromeOnDocker,
+    stop as stopLocalChrome,
+} from './local-chrome';
 import { GET_WINDOW_DIMENSIONS_INFO_SCRIPT } from '../../../utils/client-functions';
 import { BrowserClient } from './cdp-client';
+import { dispatchEvent as dispatchNativeAutomationEvent, navigateTo } from '../../../../../native-automation/utils/cdp';
+import { chromeBrowserProviderLogger } from '../../../../../utils/debug-loggers';
+import { EventType } from '../../../../../native-automation/types';
+import delay from '../../../../../utils/delay';
+import { toNativeAutomationSetupOptions } from '../../../../../native-automation/utils/convert';
 
 const MIN_AVAILABLE_DIMENSION = 50;
 
@@ -14,6 +23,13 @@ export default {
 
     getConfig (name) {
         return getConfig(name);
+    },
+
+    async getCurrentCDPSession (browserId) {
+        const { browserClient } = this.openedBrowsers[browserId];
+        const cdpClient         = await browserClient.getActiveClient();
+
+        return cdpClient;
     },
 
     _getBrowserProtocolClient (runtimeInfo) {
@@ -39,9 +55,24 @@ export default {
         this.setUserAgentMetaInfo(browserId, metaInfo, options);
     },
 
-    async openBrowser (browserId, pageUrl, config, disableMultipleWindows, proxyless) {
+    async _setupNativeAutomation ({ browserClient, runtimeInfo, nativeAutomationOptions }) {
+        const nativeAutomation = await browserClient.createMainWindowNativeAutomation(nativeAutomationOptions);
+
+        await nativeAutomation.start();
+
+        runtimeInfo.nativeAutomation = nativeAutomation;
+    },
+
+    async _startChrome (startOptions, pageUrl) {
+        if (startOptions.isContainerized)
+            await startLocalChromeOnDocker(pageUrl, startOptions);
+        else
+            await startLocalChrome(pageUrl, startOptions);
+    },
+
+    async openBrowser (browserId, pageUrl, config, additionalOptions) {
         const parsedPageUrl = parseUrl(pageUrl);
-        const runtimeInfo   = await this._createRunTimeInfo(parsedPageUrl.hostname, config, disableMultipleWindows);
+        const runtimeInfo   = await this._createRunTimeInfo(parsedPageUrl.hostname, config, additionalOptions.disableMultipleWindows);
 
         runtimeInfo.browserName = this._getBrowserName();
         runtimeInfo.browserId   = browserId;
@@ -51,30 +82,38 @@ export default {
             reportWarning:            (...args) => this.reportWarning(browserId, ...args),
         };
 
-        await startLocalChrome(pageUrl, runtimeInfo);
-
+        //NOTE: A not-working tab is opened when the browser start in the docker so we should create a new tab.
+        await this._startChrome(Object.assign({ isNativeAutomation: additionalOptions.nativeAutomation }, runtimeInfo), pageUrl);
         await this.waitForConnectionReady(browserId);
 
         runtimeInfo.viewportSize      = await this.runInitScript(browserId, GET_WINDOW_DIMENSIONS_INFO_SCRIPT);
         runtimeInfo.activeWindowId    = null;
         runtimeInfo.windowDescriptors = {};
 
-        if (!disableMultipleWindows)
-            runtimeInfo.activeWindowId = this.calculateWindowId();
-
-        const browserClient = new BrowserClient(runtimeInfo, proxyless);
+        const browserClient = new BrowserClient(runtimeInfo);
 
         this.openedBrowsers[browserId] = runtimeInfo;
 
-        await browserClient.init();
+        if (additionalOptions.nativeAutomation)
+            await this._setupNativeAutomation({ browserId, browserClient, runtimeInfo, nativeAutomationOptions: toNativeAutomationSetupOptions(additionalOptions, config.headless) });
+
+        if (additionalOptions.nativeAutomation || !additionalOptions.disableMultipleWindows)
+            runtimeInfo.activeWindowId = runtimeInfo?.nativeAutomation?.windowId || this.calculateWindowId();
+
+        await browserClient.initMainWindowCdpClient();
 
         await this._ensureWindowIsExpanded(browserId, runtimeInfo.viewportSize);
 
         this._setUserAgentMetaInfoForEmulatingDevice(browserId, runtimeInfo.config);
+
+        chromeBrowserProviderLogger('browser opened %s', browserId);
     },
 
-    async closeBrowser (browserId) {
+    async closeBrowser (browserId, closingInfo = {}) {
         const runtimeInfo = this.openedBrowsers[browserId];
+
+        if (runtimeInfo.nativeAutomation)
+            await runtimeInfo.nativeAutomation.dispose();
 
         if (runtimeInfo.browserClient.isHeadlessTab())
             await runtimeInfo.browserClient.closeTab();
@@ -84,10 +123,12 @@ export default {
         if (OS.mac || runtimeInfo.config.headless)
             await stopLocalChrome(runtimeInfo);
 
-        if (runtimeInfo.tempProfileDir)
+        if (runtimeInfo.tempProfileDir && !closingInfo.isRestarting)
             await runtimeInfo.tempProfileDir.dispose();
 
         delete this.openedBrowsers[browserId];
+
+        chromeBrowserProviderLogger('browser closed %s', browserId);
     },
 
     async resizeWindow (browserId, width, height, currentWidth, currentHeight) {
@@ -103,10 +144,34 @@ export default {
         await runtimeInfo.browserClient.resizeWindow({ width, height });
     },
 
+    async maximizeWindowNativeAutomation (browserId) {
+        const { browserClient } = this.openedBrowsers[browserId];
+
+        await browserClient.maximizeWindowNativeAutomation();
+    },
+
+    async resizeBounds (browserId, width, height, currentWidth, currentHeight) {
+        const { browserClient } = this.openedBrowsers[browserId];
+
+        await browserClient.resizeBounds({ width, height, currentWidth, currentHeight });
+    },
+
+    async startCapturingVideo (browserId) {
+        const { browserClient } = this.openedBrowsers[browserId];
+
+        await browserClient.startCapturingVideo();
+    },
+
+    async stopCapturingVideo (browserId) {
+        const { browserClient } = this.openedBrowsers[browserId];
+
+        await browserClient.stopCapturingVideo();
+    },
+
     async getVideoFrameData (browserId) {
         const { browserClient } = this.openedBrowsers[browserId];
 
-        return browserClient.getScreenshotData();
+        return browserClient.getVideoFrameData();
     },
 
     async hasCustomActionForBrowser (browserId) {
@@ -121,10 +186,6 @@ export default {
             hasChromelessScreenshots:       !!client,
             hasGetVideoFrameData:           !!client,
             hasCanResizeWindowToDimensions: false,
-            hasExecuteClientFunction:       !!client,
-            hasSwitchToIframe:              !!client,
-            hasSwitchToMainWindow:          !!client,
-            hasExecuteSelector:             !!client,
         };
     },
 
@@ -135,5 +196,44 @@ export default {
 
             await this.resizeWindow(browserId, newWidth, newHeight, outerWidth, outerHeight);
         }
+    },
+
+    async openFileProtocol (browserId, url) {
+        const cdpClient = await this.getCurrentCDPSession(browserId);
+
+        await navigateTo(cdpClient, url);
+    },
+
+    async dispatchNativeAutomationEvent (browserId, type, options) {
+        const cdpClient = await this.getCurrentCDPSession(browserId);
+
+        await dispatchNativeAutomationEvent(cdpClient, type, options);
+    },
+
+    async dispatchNativeAutomationEventSequence (browserId, eventSequence) {
+        const cdpClient = await this.getCurrentCDPSession(browserId);
+
+        for (const event of eventSequence) {
+            if (event.type === EventType.Delay)
+                await delay(event.options.delay);
+            else
+                await dispatchNativeAutomationEvent(cdpClient, event.type, event.options);
+        }
+    },
+
+    supportNativeAutomation () {
+        return true;
+    },
+
+    getNativeAutomation (browserId) {
+        const runtimeInfo = this.openedBrowsers[browserId];
+
+        return runtimeInfo.nativeAutomation;
+    },
+
+    async getNewWindowIdInNativeAutomation (browserId) {
+        const runtimeInfo = this.openedBrowsers[browserId];
+
+        return runtimeInfo.nativeAutomation.getNewWindowIdInNativeAutomation();
     },
 };

@@ -60,8 +60,8 @@ export default class ClientScript {
             this.content = this.content.toString();
             this.url     = path || this.url;
         }
-        catch (e) {
-            throw new GeneralError(RUNTIME_ERRORS.cannotLoadClientScriptFromPath, path);
+        catch (e: any) {
+            throw new GeneralError(RUNTIME_ERRORS.cannotLoadClientScriptFromPath, path, e.message);
         }
     }
 
@@ -71,7 +71,7 @@ export default class ClientScript {
         try {
             resolvedPath = require.resolve(name);
         }
-        catch (e) {
+        catch (e: any) {
             throw new GeneralError(RUNTIME_ERRORS.clientScriptModuleEntryPointPathCalculationError, e.message);
         }
 
@@ -111,7 +111,7 @@ export default class ClientScript {
     }
 
     private _calculateHash (): void {
-        this.hash = createHash('md5').update(this.content).digest();
+        this.hash = createHash('sha256').update(this.content).digest();
     }
 
     private _contentToString (): string {
@@ -137,5 +137,9 @@ export default class ClientScript {
 
     public static get URL_UNIQUE_PART_LENGTH (): number {
         return URL_UNIQUE_PART_LENGTH;
+    }
+
+    public getResultUrl (folderName: string): string {
+        return `/custom-client-scripts/${folderName}/${this.url}`;
     }
 }

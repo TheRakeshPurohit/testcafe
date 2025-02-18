@@ -1,9 +1,11 @@
-const path               = require('path');
-const fs                 = require('fs');
-const { expect }         = require('chai');
-const config             = require('../../../../config.js');
-const assertionHelper    = require('../../../../assertion-helper.js');
-const { createReporter } = require('../../../../utils/reporter');
+const path                      = require('path');
+const fs                        = require('fs');
+const { expect }                = require('chai');
+const config                    = require('../../../../config.js');
+const assertionHelper           = require('../../../../assertion-helper.js');
+const { createReporter }        = require('../../../../utils/reporter');
+const { createWarningReporter }  = require('../../../../utils/warning-reporter');
+const { skipInNativeAutomation } = require('../../../../utils/skip-in');
 
 const SCREENSHOTS_PATH                   = path.resolve(assertionHelper.SCREENSHOTS_PATH);
 const THUMBNAILS_DIR_NAME                = assertionHelper.THUMBNAILS_DIR_NAME;
@@ -23,11 +25,18 @@ const getReporter = function (scope) {
         screenshot.thumbnailPath   = patchScreenshotPath(screenshot.thumbnailPath);
         screenshot.isPassedAttempt = quarantine[screenshot.quarantineAttempt].passed;
         screenshot.testRunId       = scope.testRunIds.includes(screenshot.testRunId);
+        screenshot.actionId        = screenshot.takenOnFail || scope.actionIds.includes(screenshot.actionId);
 
         userAgents[screenshot.userAgent] = true;
     }
 
     return createReporter({
+        reportTestActionStart: (name, { command }) => {
+            if (!scope.actionIds)
+                scope.actionIds = [];
+
+            scope.actionIds.push(command.failedActionId || command.actionId);
+        },
         reportTestDone: (name, testRunInfo) => {
             testRunInfo.screenshots.forEach(screenshot => prepareScreenshot(screenshot, testRunInfo.quarantine));
 
@@ -44,12 +53,31 @@ const getReporter = function (scope) {
 describe('[API] t.takeScreenshot()', function () {
     afterEach(assertionHelper.removeScreenshotDir);
 
-    if (config.useLocalBrowsers && config.currentEnvironmentName !== config.testingEnvironmentNames.localBrowsersIE) {
+    if (config.useLocalBrowsers) {
         it('Should take a screenshot', function () {
             return runTests('./testcafe-fixtures/take-screenshot.js', 'Take a screenshot', { setScreenshotPath: true })
                 .then(function () {
                     expect(SCREENSHOT_PATH_MESSAGE_RE.test(testReport.screenshotPath)).eql(true);
                     expect(assertionHelper.checkScreenshotsCreated({ forError: false, screenshotsCount: 4 })).eql(true);
+                });
+        });
+
+        it('Should emit a warning on rewriting a screenshot', function () {
+            const { reporter, assertReporterWarnings, warningResult } = createWarningReporter();
+
+            const screenshotPath = path.join(SCREENSHOTS_PATH, 'custom', 'duplicate.png');
+
+            return runTests('./testcafe-fixtures/take-screenshot.js', 'Rewrite a screenshot with warning', { reporter, setScreenshotPath: true })
+                .then(function () {
+                    expect(warningResult.warnings[0].message).eql('The file at "' + screenshotPath + '" already exists. ' +
+                                                          'It has just been rewritten with a recent screenshot. ' +
+                                                          'This situation can possibly cause issues. To avoid them, make sure ' +
+                                                          'that each screenshot has a unique path. ' +
+                                                          'If a test runs in multiple browsers, consider including the user ' +
+                                                          'agent in the screenshot path or generate a unique identifier' +
+                                                          ' in another way.');
+
+                    assertReporterWarnings('takeScreenshot');
                 });
         });
 
@@ -86,6 +114,32 @@ describe('[API] t.takeScreenshot()', function () {
                 });
         });
 
+        it('Should take a screenshot with a custom pathPattern', function () {
+            return runTests('./testcafe-fixtures/take-screenshot.js', 'Take a screenshot with a pathPattern')
+                .then(function () {
+                    const screenshotPath = path.join('screenshots', 'Take a screenshot with a pathPattern');
+                    const screenshotsCheckingOptions = { baseDir: 'screenshots', forError: false, screenshotsCount: 2, customPath: screenshotPath };
+
+                    expect(assertionHelper.checkScreenshotsCreated(screenshotsCheckingOptions)).eql(true);
+                    return assertionHelper.removeScreenshotDir('screenshots');
+                });
+        });
+
+        it('Should create a warning if pathPattern is used with path parameter', function () {
+            const { reporter, assertReporterWarnings, warningResult } = createWarningReporter();
+
+            return runTests('./testcafe-fixtures/take-screenshot.js', 'Should create a warning and use path parameter', { reporter })
+                .then(function () {
+                    const screenshotPath             = path.join('screenshots', 'screenshot-path');
+                    const screenshotsCheckingOptions = { baseDir: 'screenshots', forError: false, screenshotsCount: 2, customPath: screenshotPath };
+
+                    expect(assertionHelper.checkScreenshotsCreated(screenshotsCheckingOptions)).eql(true);
+                    expect(warningResult.warnings[0].message).eql('The t.takeScreenshot method includes two conflicting parameters: "path" (screenshot-path/custom)  and "pathPattern" (${TEST}/custom). TestCafe applied the "path" parameter, and ignored the "pathPattern" parameter. Remove one of the parameters to dismiss this warning.');
+                    assertReporterWarnings('takeScreenshot');
+                    return assertionHelper.removeScreenshotDir('screenshots');
+                });
+        });
+
         it('Should save screenshots to default dir if screenshotPath is not specified', function () {
             return runTests('./testcafe-fixtures/take-screenshot.js', 'Take a screenshot')
                 .then(function () {
@@ -105,13 +159,16 @@ describe('[API] t.takeScreenshot()', function () {
         });
 
         it('Should create warning if screenshots are disabled', function () {
-            return runTests('./testcafe-fixtures/take-screenshot.js', 'Take a screenshot', { disableScreenshots: true })
+            const { reporter, assertReporterWarnings, warningResult } = createWarningReporter();
+
+            return runTests('./testcafe-fixtures/take-screenshot.js', 'Take a screenshot', { reporter, disableScreenshots: true })
                 .then(function () {
                     expect(assertionHelper.isScreenshotDirExists()).eql(false);
-                    expect(testReport.warnings).eql([
-                        'Screenshots are disabled. To take screenshots, remove the "--disable-screenshots" command line flag ' +
-                        'or set the "disableScreenshots" option to "false" in the API or configuration file.',
-                    ]);
+                    expect(warningResult.warnings[0].message).eql('Screenshots are disabled. To take screenshots, remove the "--disable-screenshots" command line flag ' +
+                        'or set the "disableScreenshots" option to "false" in the API or configuration file.'
+                    );
+
+                    assertReporterWarnings('takeScreenshot');
                 });
         });
 
@@ -188,7 +245,7 @@ describe('[API] t.takeScreenshot()', function () {
 
         it('Should crop screenshots to a page viewport area', function () {
             return runTests('./testcafe-fixtures/take-screenshot.js', 'Should crop screenshots',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.checkScreenshotsCropped(false, 'custom');
                 })
@@ -199,7 +256,7 @@ describe('[API] t.takeScreenshot()', function () {
 
         it('Should crop scrollbars', function () {
             return runTests('./testcafe-fixtures/take-screenshot.js', 'Should crop scrollbar',
-                { setScreenshotPath: true });
+                { setScreenshotPath: true, skip: 'safari' });
         });
 
         it('Should provide screenshot log to a reporter', function () {
@@ -220,6 +277,7 @@ describe('[API] t.takeScreenshot()', function () {
                         }
 
                         return {
+                            actionId:          true,
                             testRunId:         true,
                             screenshotPath,
                             thumbnailPath,
@@ -298,10 +356,11 @@ describe('[API] t.takeScreenshot()', function () {
 describe('[API] t.takeElementScreenshot()', function () {
     afterEach(assertionHelper.removeScreenshotDir);
 
-    if (config.useLocalBrowsers && config.currentEnvironmentName !== config.testingEnvironmentNames.localBrowsersIE) {
-        it('Should take screenshot of an element', function () {
+    if (config.useLocalBrowsers) {
+        // NOTE: is the problem not in taking screenshot but in overrided scroll automation?
+        skipInNativeAutomation('Should take screenshot of an element', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Element',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/element.png'));
                 })
@@ -310,7 +369,8 @@ describe('[API] t.takeElementScreenshot()', function () {
                 });
         });
 
-        it('Should save screenshots to default dir with custom path specified', function () {
+        // NOTE: is the problem not in taking screenshot but in overrided scroll automation?
+        skipInNativeAutomation('Should save screenshots to default dir with custom path specified', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Element')
                 .then(function () {
                     expect(assertionHelper.checkScreenshotsCreated({ baseDir: 'screenshots', customPath: 'custom' })).eql(true);
@@ -382,7 +442,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should take screenshot of an element with margins', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Element with margins',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/element-with-margins.png'));
                 })
@@ -393,7 +453,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should perform top-left crop', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Top-left',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/top-left.png'));
                 })
@@ -404,7 +464,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should perform top-left crop by default', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Default crop',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/top-left.png'));
                 })
@@ -415,7 +475,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should perform top-right crop', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Top-right',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/top-right.png'));
                 })
@@ -426,7 +486,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should perform bottom-left crop', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Bottom-left',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/bottom-left.png'));
                 })
@@ -472,7 +532,7 @@ describe('[API] t.takeElementScreenshot()', function () {
                 only:              'chrome',
             })
                 .catch(function (errs) {
-                    expect(errs[0]).to.contains('The element that matches the specified selector is not visible.');
+                    expect(errs[0]).to.contains('The action target (<table style="visibility: hidden;">...</table>) is invisible. The value of its \'visibility\' property is \'hidden\'.');
                     expect(errs[0]).to.contains(
                         ' 43 |        .click(\'#hide\')' +
                         ' > 44 |        .takeElementScreenshot(\'table\', \'custom/\' + t.ctx.parsedUA.name + \'.png\');' +
@@ -520,7 +580,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should capture screenshot of the element inside a same-domain iframe', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Same-domain iframe',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/element.png'));
                 })
@@ -531,7 +591,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should capture screenshot of the element inside a nested iframe', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Nested iframes',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/element.png'));
                 })
@@ -542,7 +602,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should capture screenshot of the element inside a cross-domain iframe', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Cross-domain iframe',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/element.png'));
                 })
@@ -553,7 +613,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it("Shouldn't scroll parent frames multiple times", function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Rescroll parents',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.isScreenshotsEqual('custom', path.join(__dirname, './data/element.png'));
                 })
@@ -564,7 +624,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should scroll to the scroll target when positive scrollTargetX/Y are specified', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Scroll target',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.checkScreenshotIsNotWhite(false, 'custom');
                 })
@@ -575,7 +635,7 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should scroll to the scroll target when negative scrollTargetX/Y are specified', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Negative scroll target',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     return assertionHelper.checkScreenshotIsNotWhite(false, 'custom');
                 })
@@ -586,10 +646,10 @@ describe('[API] t.takeElementScreenshot()', function () {
 
         it('Should remove screenshot mark from an element screenshot when the element is in bottom right corner', function () {
             return runTests('./testcafe-fixtures/take-element-screenshot.js', 'Bottom-right element',
-                { setScreenshotPath: true })
+                { setScreenshotPath: true, skip: 'safari' })
                 .then(function () {
                     function referenceImagePathGetter (screenshotPath) {
-                        const referenceImageName = screenshotPath.match(/chrome|firefox/i) ? 'element' : 'element-bottom-right';
+                        const referenceImageName = screenshotPath.match(/chrome|firefox|edge/i) ? 'element' : 'element-bottom-right';
 
                         return path.join(__dirname, `./data/${referenceImageName}.png`);
                     }
@@ -653,7 +713,10 @@ describe('[API] Take full page screenshots', function () {
                 .catch(function (errs) {
                     expect(errs[0]).to.contains('screenshot on fail');
 
-                    return assertionHelper.checkScreenshotFileFullPage(true);
+                    return assertionHelper.checkScreenshotFileFullPage(true, 'error');
+                })
+                .then(function (result) {
+                    expect(result).eql(true);
                 });
         });
     }

@@ -1,4 +1,6 @@
-const errorInEachBrowserContains = require('../../assertion-helper').errorInEachBrowserContains;
+const { errorInEachBrowserContains }                     = require('../../assertion-helper');
+const { skipInNativeAutomation, onlyInNativeAutomation } = require('../../utils/skip-in');
+
 
 describe('TestRun - Driver protocol', function () {
     it('TestRun should not process the same driver status twice', function () {
@@ -23,7 +25,8 @@ describe('TestRun - Driver protocol', function () {
             });
     });
 
-    it('Driver should prevent a real action', function () {
+    // NOTE: at this moment page events which come from real user are not prevented
+    skipInNativeAutomation('Driver should prevent a real action', function () {
         return runTests('./testcafe-fixtures/prevent-real-action-test.js', 'Perform native click');
     });
 
@@ -32,8 +35,21 @@ describe('TestRun - Driver protocol', function () {
             return runTests('./testcafe-fixtures/driver-test.js', 'Mixed execution order');
         });
 
-        it('Should clear out the localStorage and sessionStorage after test (GH-1546)', function () {
+        // NOTE: this test just is not designed for using in the nativeAutomation mode (see the next ones)
+        skipInNativeAutomation('Should clear out the localStorage and sessionStorage after test (GH-1546)(proxy)', function () {
             return runTests('./testcafe-fixtures/clear-and-lock-storages.js');
+        });
+
+        onlyInNativeAutomation('Should clear out the localStorage and sessionStorage after test (GH-1546)(native automation)', function () {
+            return runTests('./testcafe-fixtures/clear-and-lock-storages-native-automation-part-1.js');
+        });
+
+        onlyInNativeAutomation('Should clear out the localStorage and sessionStorage for multiple domains(native automation)', function () {
+            return runTests('./testcafe-fixtures/clear-and-lock-storages-native-automation-part-2.js');
+        });
+
+        it('Should force page reload if url has # in Native Automation', function () {
+            return runTests('./testcafe-fixtures/page-url-with-hash.js');
         });
     });
 });

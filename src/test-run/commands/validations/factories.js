@@ -50,3 +50,70 @@ export function createSpeedValidator (ErrorCtor) {
             throw new ErrorCtor(name, val);
     };
 }
+
+export function createStringValidator (ErrorCtor) {
+    return (name, val) => {
+        const valType = typeof val;
+
+        if (valType !== 'string')
+            throw new ErrorCtor(name, valType);
+    };
+}
+export function createStringOrRegexValidator (ErrorCtor) {
+    return (name, val) => {
+        const valType = typeof val;
+
+        if (valType !== 'string' && !(val instanceof RegExp))
+            throw new ErrorCtor(name, valType);
+    };
+}
+
+export function createDateValidator (ErrorCtor) {
+    return (name, val) => {
+        if (!(val instanceof Date))
+            throw new ErrorCtor(name, val);
+    };
+}
+
+export function createNumberValidator (ErrorCtor) {
+    return (name, val) => {
+        if (isNaN(Number(val)))
+            throw new ErrorCtor(name, typeof val);
+    };
+}
+
+export function createUrlValidator (ErrorCtor) {
+    return (name, val) => {
+        const valType = typeof val;
+
+        if (valType !== 'string' && !(val instanceof URL))
+            throw new ErrorCtor(name, valType);
+    };
+}
+
+export function createUrlSearchParamsValidator (ErrorCtor) {
+    return (name, val) => {
+        const valType = typeof val;
+
+        if (valType !== 'object' && !(val instanceof URLSearchParams))
+            throw new ErrorCtor(name, valType);
+    };
+}
+
+export function createObjectValidator (ErrorCtor) {
+    return (name, val) => {
+        const valType = typeof val;
+
+        if (valType !== 'object')
+            throw new ErrorCtor(name, valType);
+    };
+}
+
+export function createFunctionValidator (ErrorCtor) {
+    return (name, val) => {
+        const valType = typeof val;
+
+        if (valType !== 'function')
+            throw new ErrorCtor(name, valType);
+    };
+}

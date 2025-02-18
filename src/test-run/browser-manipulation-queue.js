@@ -3,16 +3,15 @@ import { isServiceCommand } from './commands/utils';
 import COMMAND_TYPE from './commands/type';
 import WARNING_MESSAGE from '../notifications/warning-message';
 import { WindowDimensionsOverflowError } from '../errors/test-run/';
-import { TEST_RUN_ERRORS } from '../errors/types';
-
 
 export default class BrowserManipulationQueue {
-    constructor (browserConnection, screenshotCapturer, warningLog) {
+    constructor (browserConnection, screenshotCapturer, warningLog, isNativeAutomation) {
         this.commands           = [];
         this.browserId          = browserConnection.id;
         this.browserProvider    = browserConnection.provider;
         this.screenshotCapturer = screenshotCapturer;
         this.warningLog         = warningLog;
+        this.isNativeAutomation = isNativeAutomation;
     }
 
     async _resizeWindow (width, height, currentWidth, currentHeight) {
@@ -22,10 +21,11 @@ export default class BrowserManipulationQueue {
             throw new WindowDimensionsOverflowError();
 
         try {
-            return await this.browserProvider.resizeWindow(this.browserId, width, height, currentWidth, currentHeight);
+            return await this.browserProvider.resizeWindow(this.browserId, width, height, currentWidth, currentHeight, this.isNativeAutomation);
         }
         catch (err) {
             this.warningLog.addWarning(WARNING_MESSAGE.resizeError, err.message);
+
             return null;
         }
     }
@@ -41,7 +41,7 @@ export default class BrowserManipulationQueue {
 
     async _maximizeWindow () {
         try {
-            return await this.browserProvider.maximizeWindow(this.browserId);
+            return await this.browserProvider.maximizeWindow(this.browserId, this.isNativeAutomation);
         }
         catch (err) {
             this.warningLog.addWarning(WARNING_MESSAGE.maximizeError, err.message);
@@ -50,35 +50,30 @@ export default class BrowserManipulationQueue {
     }
 
     async _takeScreenshot (capture) {
-        try {
-            return await capture();
-        }
-        catch (err) {
-            if (err.code === TEST_RUN_ERRORS.invalidElementScreenshotDimensionsError)
-                throw err;
-
-            this.warningLog.addWarning(WARNING_MESSAGE.screenshotError, err.stack);
-            return null;
-        }
+        return capture();
     }
 
-    async executePendingManipulation (driverMsg) {
+    async _executeCommand (driverMsg) {
         const command = this.commands.shift();
 
         switch (command.type) {
             case COMMAND_TYPE.takeElementScreenshot:
             case COMMAND_TYPE.takeScreenshot:
                 return await this._takeScreenshot(() => this.screenshotCapturer.captureAction({
-                    customPath:     command.path,
-                    pageDimensions: driverMsg.pageDimensions,
-                    cropDimensions: driverMsg.cropDimensions,
-                    markSeed:       command.markSeed,
-                    fullPage:       command.fullPage,
-                    thumbnails:     command.thumbnails,
+                    actionId:          command.actionId,
+                    customPath:        command.path,
+                    customPathPattern: command.pathPattern,
+                    pageDimensions:    driverMsg.pageDimensions,
+                    cropDimensions:    driverMsg.cropDimensions,
+                    markSeed:          command.markSeed,
+                    fullPage:          command.fullPage,
+                    thumbnails:        command.thumbnails,
                 }));
 
             case COMMAND_TYPE.takeScreenshotOnFail:
                 return await this._takeScreenshot(() => this.screenshotCapturer.captureError({
+                    actionId:       command.actionId,
+                    failedActionId: command.failedActionId,
                     pageDimensions: driverMsg.pageDimensions,
                     markSeed:       command.markSeed,
                     fullPage:       command.fullPage,
@@ -95,6 +90,22 @@ export default class BrowserManipulationQueue {
         }
 
         return null;
+    }
+
+    async executePendingManipulation (driverMsg, messageBus) {
+        const command = this.commands[0];
+
+        const handleBrowserManipulationWarning = warning => {
+            warning.actionId = warning.actionId || command.actionId;
+        };
+
+        messageBus.on('before-warning-add', handleBrowserManipulationWarning);
+
+        const result = await this._executeCommand(driverMsg);
+
+        messageBus.off('before-warning-add', handleBrowserManipulationWarning);
+
+        return result;
     }
 
     push (command) {

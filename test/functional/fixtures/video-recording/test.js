@@ -1,29 +1,24 @@
-const expect          = require('chai').expect;
-const path            = require('path');
-const { uniq }        = require('lodash');
-const config          = require('../../config');
-const assertionHelper = require('../../assertion-helper.js');
+const { expect }         = require('chai');
+const path               = require('path');
+const { uniq }           = require('lodash');
+const config             = require('../../config');
+const assertionHelper    = require('../../assertion-helper.js');
+const { createReporter } = require('../../utils/reporter');
+const ffprobe            = require('@ffprobe-installer/ffprobe');
+const childProcess       = require('child_process');
 
 function customReporter (errs, videos) {
-    return () => {
-        return {
-            async reportTaskStart () {
-            },
-            async reportFixtureStart () {
-            },
-            async reportTestDone (name, testRunInfo) {
-                testRunInfo.errs.forEach(err => {
-                    errs[err.errMsg] = true;
-                });
+    return createReporter({
+        async reportTestDone (name, testRunInfo) {
+            testRunInfo.errs.forEach(err => {
+                errs[err.errMsg] = true;
+            });
 
-                testRunInfo.videos.forEach(video => {
-                    videos.push(video);
-                });
-            },
-            async reportTaskDone () {
-            },
-        };
-    };
+            testRunInfo.videos.forEach(video => {
+                videos.push(video);
+            });
+        },
+    });
 }
 
 function checkVideoPaths (videoLog, videoPaths) {
@@ -38,6 +33,13 @@ function checkVideoPaths (videoLog, videoPaths) {
 
     for (let i = 0; i < loggedPaths.length; i++)
         expect(path.relative(actualPaths[i], loggedPaths[i])).eql('');
+}
+
+function getVideoDuration (videoPath) {
+    const command = `${ffprobe.path} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ${videoPath}`;
+    const result  = childProcess.execSync(command);
+
+    return Math.ceil(parseFloat(result.toString()));
 }
 
 const BROWSERS_SUPPORTING_VIDEO_RECORDING     = ['chrome', 'firefox'];
@@ -152,11 +154,11 @@ if (config.useLocalBrowsers) {
                 });
         });
 
-        it('Should record video with quarantine mode enabled', () => {
+        it('Should record video with quarantine mode enabled (multiple attempts)', () => {
             const errs   = {};
             const videos = [];
 
-            return runTests('./testcafe-fixtures/quarantine-test.js', '', {
+            return runTests('./testcafe-fixtures/quarantine-test.js', 'quarantine with attempts', {
                 only:           'chrome',
                 quarantineMode: true,
                 setVideoPath:   true,
@@ -164,7 +166,28 @@ if (config.useLocalBrowsers) {
             })
                 .then(assertionHelper.getVideoFilesList)
                 .then(videoFiles => {
-                    expect(videoFiles.length).to.equal(2);
+                    expect(videoFiles.length).eql(1);
+                    expect(videos[0].timecodes.length).eql(4);
+                    expect(videos[0].timecodes[0]).eql(0);
+                    expect(videos[0].timecodes.filter(tc => tc > 0).length).eql(3);
+
+                    checkVideoPaths(videos, videoFiles);
+                });
+        });
+
+        it('Should record video with quarantine mode enabled (no attempts)', () => {
+            const errs   = {};
+            const videos = [];
+
+            return runTests('./testcafe-fixtures/quarantine-test.js', 'quarantine without attempts', {
+                only:           'chrome',
+                quarantineMode: true,
+                setVideoPath:   true,
+                reporter:       customReporter(errs, videos),
+            })
+                .then(assertionHelper.getVideoFilesList)
+                .then(videoFiles => {
+                    expect(videoFiles.length).to.equal(1);
 
                     checkVideoPaths(videos, videoFiles);
                 });
@@ -182,9 +205,25 @@ if (config.useLocalBrowsers) {
                 },
             })
                 .catch(() => {
-                    expect(testReport.warnings).eql(['The "${TEST_INDEX}" path pattern placeholder cannot be applied to the recorded video.' +
+                    expect(testReport.warnings).eql(['TestCafe could not apply the following video recording save path pattern: "${TEST_INDEX}".\n' +
+                                                     'You may encounter this behavior when you enable the "singleFile" video recording option and use test-specific path patterns.' +
                                                      '\n\n' +
                                                      'The placeholder was replaced with an empty string.']);
+                });
+        });
+
+        it('Should record a correct video for test with only "wait action"', () => {
+            return runTests('./testcafe-fixtures/only-wait.js', '', {
+                only:         'chrome',
+                setVideoPath: true,
+            })
+                .then(assertionHelper.getVideoFilesList)
+                .then(videoFiles => {
+                    expect(videoFiles.length).to.equal(1);
+
+                    const duration = getVideoDuration(videoFiles[0]);
+
+                    expect(duration).gte(10);
                 });
         });
     });

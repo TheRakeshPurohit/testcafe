@@ -16,9 +16,10 @@ export interface APIInfo {
     apiFnID: number;
 }
 
-export interface FnInfo {
+export interface SelectorErrorParams {
     apiFnChain: string[];
     apiFnIndex: number | null;
+    reason: string | null;
 }
 
 type CustomDOMProperties = Dictionary<(n: Node) => unknown>;
@@ -31,7 +32,7 @@ export interface SelectorDependencies extends Dictionary<unknown> {
     customDOMProperties?: CustomDOMProperties;
 }
 
-type SelectorErrorCb = (fn: FnInfo | null) => SelectorErrorBase;
+type SelectorErrorCb = (fn: SelectorErrorParams | null) => SelectorErrorBase;
 
 export interface NativeMethods {
     Function: typeof Function;
@@ -39,32 +40,22 @@ export interface NativeMethods {
     objectKeys: ObjectConstructor['keys'];
     objectAssign: ObjectConstructor['assign'];
     objectGetPrototypeOf: ObjectConstructor['getPrototypeOf'];
-    objectToString: Object['toString']; // eslint-disable-line @typescript-eslint/ban-types
+    objectToString: Object['toString']; // eslint-disable-line @typescript-eslint/ban-types, no-restricted-globals
     Promise: typeof Promise;
     dateNow: DateConstructor['now'];
     isArray: ArrayConstructor['isArray'];
+    arrayFilter: any[]['filter'];
     NodeList: typeof NodeList;
     HTMLCollection: typeof HTMLCollection;
     setTimeout: Window['setTimeout'];
     elementClass: typeof Element;
     svgElementClass: typeof SVGElement;
     closest: Element['closest'];
+    matches: Element['matches'];
     getAttribute: Element['getAttribute'];
     querySelector: HTMLElement['querySelector'];
     querySelectorAll: HTMLElement['querySelectorAll'];
+    contentWindowGetter: () => HTMLIFrameElement['contentWindow'];
+    scrollTo: Window['scrollTo'];
 }
 
-export interface ClientFunctionAdapter {
-    isProxyless: boolean;
-    nativeMethods: NativeMethods;
-    PromiseCtor: typeof Promise;
-    delay (ms: number): Promise<void>;
-    isShadowRoot (el: Node): boolean;
-    isDomElement (el: unknown): boolean;
-    isTextNode (el: unknown): boolean;
-    isOptionElement (el: unknown): boolean;
-    getTagName (el: Element): string;
-    isOptionElementVisible (el: Node): boolean;
-    isElementVisible (el: Node): boolean;
-    getActiveElement (): Node;
-}

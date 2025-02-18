@@ -7,7 +7,7 @@ import {
     restoreWindowState,
     getWindowHeight,
     getWindowWidth,
-} from '../../../../../window-helpers';
+} from '../../../../../esm-utils/window-helpers.js';
 
 
 const setWindowOnresizeHandler = ClientFunction(() => {
@@ -87,4 +87,28 @@ test('Too big size', async t => {
     const hugeHeight = 100000;
 
     await t.resizeWindow(hugeWidth, hugeHeight);
+});
+
+test('Resize the window after maximizeWindow', async t => {
+    await t.maximizeWindow();
+
+    expect(await getWindowWidth()).to.be.at.least(640);
+    expect(await getWindowHeight()).to.be.at.least(480);
+
+    await t.resizeWindow(640, 480);
+
+    expect(await getWindowWidth()).equals(640);
+    expect(await getWindowHeight()).equals(480);
+});
+
+test('Correctly maximizeWindow after resize', async t => {
+    await t.resizeWindow(640, 480);
+
+    expect(await getWindowWidth()).equals(640);
+    expect(await getWindowHeight()).equals(480);
+
+    await t.maximizeWindow();
+
+    expect(await getWindowWidth()).to.be.above(640);
+    expect(await getWindowHeight()).to.be.above(480);
 });
